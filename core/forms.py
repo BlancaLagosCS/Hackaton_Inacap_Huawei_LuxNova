@@ -1,9 +1,30 @@
+import re
+
 from django import forms
 from django.contrib.auth import authenticate
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.utils import timezone
 
-from .models import ComentarioForo, PublicacionForo, Sede, Usuario
+from .models import CARRERAS_CHOICES, ComentarioForo, PublicacionForo, Sede, Usuario
+
+
+# Recibe un RUT con formato libre; valida su dígito Módulo 11 y devuelve cuerpo-DV o un error de formulario.
+def validar_rut_chileno(rut_raw):
+    limpio = re.sub(r'[.\s]', '', str(rut_raw)).upper()
+    coincidencia = re.fullmatch(r'([0-9]{1,8})-?([0-9K])', limpio)
+    error = 'El RUT ingresado no es válido (dígito verificador incorrecto).'
+    if not coincidencia:
+        raise forms.ValidationError(error)
+    cuerpo, digito = coincidencia.groups()
+    cuerpo = str(int(cuerpo))
+    if cuerpo == '0':
+        raise forms.ValidationError(error)
+    suma = sum(int(numero) * (2 + indice % 6) for indice, numero in enumerate(reversed(cuerpo)))
+    resultado = 11 - suma % 11
+    esperado = '0' if resultado == 11 else 'K' if resultado == 10 else str(resultado)
+    if digito != esperado:
+        raise forms.ValidationError(error)
+    return f'{cuerpo}-{esperado}'
 
 
 # Construye opciones legibles; recibe una sede y devuelve su nombre institucional.
@@ -16,6 +37,7 @@ class SelectorSede(forms.ModelChoiceField):
 # Valida el alta estudiantil; recibe datos y produce un usuario con contraseña cifrada.
 class RegistroForm(UserCreationForm):
     sede_usu = SelectorSede(queryset=Sede.objects.order_by('nom_sede'), label='Sede', empty_label='Selecciona tu sede')
+    carr_usu = forms.ChoiceField(choices=[('', 'Selecciona tu carrera')] + CARRERAS_CHOICES, label='Carrera')
 
     # Declara los campos editables; recibe metadatos y configura el formulario de registro.
     class Meta:
@@ -28,7 +50,7 @@ class RegistroForm(UserCreationForm):
         super().__init__(*args, **kwargs)
         for name, field in self.fields.items():
             field.required = True
-            field.widget.attrs['class'] = 'form-select' if name == 'sede_usu' else 'form-control'
+            field.widget.attrs['class'] = 'form-select' if name in ('sede_usu', 'carr_usu') else 'form-control'
         self.fields['anio_usu'].min_value = 1900
         self.fields['anio_usu'].max_value = timezone.localdate().year
         self.fields['anio_usu'].widget.attrs.update(min=1900, max=timezone.localdate().year)
@@ -37,8 +59,15 @@ class RegistroForm(UserCreationForm):
     def clean_corr_usu(self):
         correo = self.cleaned_data['corr_usu'].strip().lower()
         if Usuario.objects.filter(corr_usu__iexact=correo).exists():
-            raise forms.ValidationError('Ya existe una cuenta con este correo.')
+            raise forms.ValidationError('Este correo institucional ya está registrado.')
         return correo
+
+    # Recibe el RUT enviado; devuelve su forma validada y normalizada o un error claro de duplicación.
+    def clean_rut_usu(self):
+        rut = validar_rut_chileno(self.cleaned_data['rut_usu'])
+        if Usuario.objects.filter(rut_usu__iexact=rut).exists():
+            raise forms.ValidationError('Este RUT ya se encuentra registrado en el sistema.')
+        return rut
 
     # Recibe el año de ingreso; devuelve un año válido o un error de rango.
     def clean_anio_usu(self):
@@ -54,6 +83,22 @@ class RegistroForm(UserCreationForm):
         if commit:
             usuario.save()
         return usuario
+
+
+# Conserva compatibilidad con v2; recibe los mismos datos y devuelve el formulario de registro validado.
+class RegistroUsuarioForm(RegistroForm):
+    pass
+
+
+# Recibe foto y biografía del propietario; devuelve exclusivamente esos campos editables y validados.
+class EditarPerfilForm(forms.ModelForm):
+    # Recibe metadatos de Usuario y configura los únicos campos permitidos en la edición del perfil.
+    class Meta:
+        model = Usuario
+        fields = ('foto_usu', 'bio_usu')
+        labels = {'foto_usu': 'Foto de perfil', 'bio_usu': 'Biografía'}
+        widgets = {'foto_usu': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/*'}),
+                   'bio_usu': forms.Textarea(attrs={'class': 'form-control', 'rows': 3})}
 
 
 # Autentica por nombre o correo; recibe credenciales y devuelve un formulario con usuario autenticado.

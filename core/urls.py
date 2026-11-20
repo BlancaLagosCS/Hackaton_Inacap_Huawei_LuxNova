@@ -15,5 +15,6 @@ urlpatterns = [
     path('foro/', views.foro_ahora_mismo, name='foro'),
     path('foro/<int:publ_id>/comentar/', views.comentar_publicacion, name='comentar_publicacion'),
     path('inbox/', views.inbox, name='inbox'),
-    path('perfil/', views.perfil, name='perfil'),
+    path('perfil/', views.mi_perfil, name='perfil'),
+    path('perfil/<int:usuario_id>/', views.ver_perfil, name='ver_perfil'),
 ]

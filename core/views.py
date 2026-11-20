@@ -1,16 +1,17 @@
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models import Prefetch
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, JsonResponse
+from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ComentarioForoForm, PublicacionForoForm, RegistroForm
-from .models import ComentarioForo, Evento, MensajeInbox, PublicacionForo
+from .forms import ComentarioForoForm, EditarPerfilForm, PublicacionForoForm, RegistroUsuarioForm
+from .models import Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, Usuario
 from .services import notificar_iniciativa
 
 
@@ -19,7 +20,7 @@ def home(request):
     contexto = {}
     if request.user.is_authenticated:
         inscripciones = Evento.asis_even.through.objects.filter(evento_id=OuterRef('pk'), usuario_id=request.user.pk)
-        eventos = Evento.objects.filter(est_even='APROBADO', fech_even__gte=timezone.now()).select_related('sede_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
+        eventos = Evento.objects.filter(est_even='APROBADO', fech_even__gte=timezone.now()).select_related('sede_even', 'crea_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
         contexto = {'eventos_sede': eventos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(), 'eventos_intersede': eventos.filter(alc_even='INTERSEDE')}
     return render(request, 'home.html', contexto)
 
@@ -28,12 +29,23 @@ def home(request):
 def registro(request):
     if request.user.is_authenticated:
         return redirect('core:home')
-    form = RegistroForm(request.POST or None)
+    form = RegistroUsuarioForm(request.POST if request.method == 'POST' else None)
     if request.method == 'POST' and form.is_valid():
-        usuario = form.save()
-        login(request, usuario)
-        messages.success(request, 'Tu cuenta está lista. ¡Bienvenido a LuxNova!')
-        return redirect('core:home')
+        # Repite la comprobación en vista y captura carreras de inserción sin romper la transacción de la petición.
+        if Usuario.objects.filter(rut_usu__iexact=form.cleaned_data['rut_usu']).exists():
+            form.add_error('rut_usu', 'Este RUT ya se encuentra registrado en el sistema.')
+        if Usuario.objects.filter(corr_usu__iexact=form.cleaned_data['corr_usu']).exists():
+            form.add_error('corr_usu', 'Este correo institucional ya está registrado.')
+        if not form.errors:
+            try:
+                with transaction.atomic():
+                    usuario = form.save()
+            except IntegrityError:
+                form.add_error(None, 'El RUT, correo institucional o nombre de usuario ya está registrado. Revisa tus datos.')
+            else:
+                login(request, usuario)
+                messages.success(request, 'Tu cuenta está lista. ¡Bienvenido a LuxNova!')
+                return redirect('core:home')
     return render(request, 'registro.html', {'form': form})
 
 
@@ -130,7 +142,62 @@ def inbox(request):
     return render(request, 'inbox.html', {'mensajes_inbox': mensajes})
 
 
-# Recibe una petición autenticada y devuelve el perfil del usuario actual.
+ROLES_GESTION = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'DAE', 'ADMIN')
+
+
+# Recibe visitante y dueño de un teléfono; devuelve si el visitante es propietario o tiene un rol autorizado.
+def puede_ver_contacto(visitante, propietario):
+    return visitante.pk == propietario.pk or visitante.rol_usu in ROLES_GESTION
+
+
+# Recibe visitante y perfil consultado; devuelve evento próximo o reciente y asistentes con contactos filtrados por permisos.
+def resumen_perfil(visitante, perfil_usuario):
+    if perfil_usuario.rol_usu not in ROLES_GESTION:
+        return None
+    eventos = Evento.objects.filter(crea_even=perfil_usuario, est_even='APROBADO')
+    evento = eventos.filter(fech_even__gte=timezone.now()).order_by('fech_even', 'pk').first() or eventos.order_by('-fech_even', '-pk').first()
+    if not evento:
+        return None
+    asistentes = [{'nombre': u.nom_usu or u.username, 'carrera': u.carr_usu,
+                   'telefono': u.tel_usu if puede_ver_contacto(visitante, u) else None,
+                   'url': reverse('core:ver_perfil', args=[u.pk])}
+                  for u in evento.asis_even.order_by('nom_usu', 'pk')]
+    return {'titulo': evento.tit_even, 'fecha': timezone.localtime(evento.fech_even).strftime('%d/%m/%Y %H:%M'),
+            'total': len(asistentes), 'asistentes': asistentes}
+
+
+# Recibe petición, perfil y formulario opcional; devuelve HTML o métricas JSON sin teléfonos no autorizados.
+def mostrar_perfil(request, perfil_usuario, form=None):
+    resumen = resumen_perfil(request.user, perfil_usuario)
+    if request.GET.get('formato') == 'json':
+        respuesta = JsonResponse({'resumen': resumen})
+        respuesta['Cache-Control'] = 'private, no-store'
+        return respuesta
+    asistidos = perfil_usuario.eventos_asistidos.filter(est_even='APROBADO').select_related('sede_even').order_by('-fech_even')
+    organizados = Evento.objects.filter(crea_even=perfil_usuario, est_even='APROBADO').select_related('sede_even').order_by('-fech_even')
+    return render(request, 'perfil.html', {'perfil_usuario': perfil_usuario, 'es_propio': request.user.pk == perfil_usuario.pk,
+        'puede_ver_telefono': puede_ver_contacto(request.user, perfil_usuario), 'es_gestor': perfil_usuario.rol_usu in ROLES_GESTION,
+        'eventos_asistidos': asistidos, 'eventos_organizados': organizados,
+        'clubes_liderados': Club.objects.filter(lid_club=perfil_usuario, est_club='APROBADO'),
+        'publicaciones_count': PublicacionForo.objects.filter(aut_publ=perfil_usuario).count(),
+        'resumen': resumen, 'perfil_form': form})
+
+
+# Recibe GET/POST del propietario; guarda foto/bio permitidas y devuelve su perfil o errores sin editar identidad ni rol.
 @login_required
-def perfil(request):
-    return render(request, 'perfil.html')
+@require_http_methods(['GET', 'POST'])
+def mi_perfil(request):
+    form = EditarPerfilForm(request.POST if request.method == 'POST' else None, request.FILES or None, instance=request.user)
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        messages.success(request, 'Foto y biografía actualizadas.')
+        return redirect('core:perfil')
+    return mostrar_perfil(request, request.user, form)
+
+
+# Recibe GET autenticado y un ID; devuelve el perfil público existente o 404, sin permitir ediciones por esta ruta.
+@login_required
+@require_http_methods(['GET'])
+def ver_perfil(request, usuario_id):
+    perfil_usuario = get_object_or_404(Usuario.objects.select_related('sede_usu'), pk=usuario_id)
+    return mostrar_perfil(request, perfil_usuario)

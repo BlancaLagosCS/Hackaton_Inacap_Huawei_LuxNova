@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import Evento, PublicacionForo, Sede, Usuario
+from core.models import CARRERAS_CHOICES, Evento, PublicacionForo, Sede, Usuario
 from core.services import notificar_iniciativa
 
 
@@ -23,11 +23,15 @@ class Command(BaseCommand):
         cuentas += [(f'est{i}', 'ESTUDIANTE', f'Estudiante Demo {i}') for i in range(1, 6)]
         creadas = 0
         for indice, (username, rol, nombre) in enumerate(cuentas, start=1):
-            usuario, nuevo = Usuario.objects.get_or_create(username=username, defaults={'nom_usu': nombre, 'rut_usu': f'DEMO-{indice:03d}', 'corr_usu': f'{username}@demo.inacap.cl', 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': 'Ingeniería en Informática', 'anio_usu': timezone.localdate().year, 'rol_usu': rol})
+            usuario, nuevo = Usuario.objects.get_or_create(username=username, defaults={'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': f'{username}@demo.inacap.cl', 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0], 'anio_usu': timezone.localdate().year, 'rol_usu': rol})
             if nuevo:
                 usuario.set_password('1234')
                 usuario.save()
                 creadas += 1
+            # Actualiza solo los datos sintéticos de estas cuentas demo; conserva sus contraseñas y relaciones.
+            usuario.rut_usu = f'{str(indice) * 8}-{indice}'
+            usuario.carr_usu = CARRERAS_CHOICES[0][0]
+            usuario.save(update_fields=['rut_usu', 'carr_usu'])
         lider = Usuario.objects.get(username='lider_rancagua')
         for titulo, alcance, dias, espacio, descripcion in [
             ('Encuentro de clubes · Rancagua', 'SEDE', 7, 'Patio central', 'Conoce a tus compañeros y descubre iniciativas para participar en tu sede.'),

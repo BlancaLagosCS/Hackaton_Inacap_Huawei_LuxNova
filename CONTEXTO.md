@@ -18,7 +18,7 @@
 * **Antes vs. Después (Narrativa de Demo):**
   * *Antes:* Información fragmentada en afiches/redes externas, baja participación, procesos lentos o informales para levantar clubes y sin trazabilidad de iniciativas estudiantiles.
   * *Después:* Todo ocurre en un solo portal por sede con validación comunitaria, aprobación trazable por DAE y visibilidad inmediata para todos los estudiantes.
-* **Restricción de Privacidad y Datos:** No utilizar datos personales reales. Todos los usuarios, RUTs, correos y teléfonos en fixtures/pruebas son **100% ficticios**, y el teléfono del estudiante (`tel_usu`) es **privado** (solo visible para Líderes Estudiantiles, Delegados, Jefatura y DAE).
+* **Restricción de Privacidad y Datos:** No utilizar datos personales reales. Los datos de demo/pruebas son sintéticos. El teléfono (`tel_usu`) solo es visible para su propietario o un visitante con rol LIDER_ESTUDIANTIL, DELEGADO, JEFATURA, DAE o ADMIN. Aplicar esta regla tanto en HTML como en JSON y tablas de asistentes.
 
 ---
 
@@ -88,9 +88,30 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
   - Alcance: Paleta institucional (#E30613, #1A1A1A, #FFFFFF), base.html con Navbar de 4 enlaces y espacio reservado para logo, registro por sede/carrera/año, login/logout, home.html (Eventos Sede + Intersede + Pre-inscripción), animaciones.js (IntersectionObserver), cargar_datos_demo.py y CONTEXTO_VERSIONES.md.
 - v3 — Foro "Ahora Mismo" por Sede y Disparo Automático de Iniciativas [COMPLETADA]:
   - Alcance: Ruta /foro/ filtrada por sede_usu, publicaciones cronológicas con foto opcional, comentarios y regla automática: al publicar con etiqueta INICIATIVA, se envía un MensajeInbox (INICIATIVA_BUZON) con correo y teléfono del autor a todos los LIDER_ESTUDIANTIL y DAE de la sede.
-- v4 — Perfiles Estilo Instagram (Propio y Público) + Métricas de Asistencia [PENDIENTE]:
+- v4 — Perfiles Estilo Instagram (Propio y Público) + Métricas de Asistencia [COMPLETADA]:
   - Alcance: Rutas /perfil/ y /perfil/<id>/ con foto circular, bio editable, insignia de rol, carrera, año, sede, privacidad estricta de tel_usu (solo visible para Líderes, Delegados, Jefatura y DAE), historial público de eventos asistidos/organizados y tarjeta resumen en vivo del próximo evento para Líderes/DAE.
 - v5 — Inbox del Sistema (Chat Oficial + Confirmación de 4 Avales + Buzón Iniciativas) [PENDIENTE]:
   - Alcance: Ruta /inbox/ con badge de no leídos, mensajes oficiales del Sistema con botones Aceptar / Rechazar Aval (al llegar a 4 avales aceptados, el Club escala automáticamente a PENDIENTE_DAE y notifica a la DAE) y pestaña Buzón de Iniciativas visible solo para Líderes y DAE.
 - v6 — Postulación a Club, Reserva de Espacios (Sin Solapamientos) y Panel/Auditoría DAE [VERSIÓN FINAL - PENDIENTE]:
   - Alcance: Formularios integrados en Mi Perfil según rol: (1) Postulación a Club seleccionando 4 compañeros de sede; (2) Solicitud de Reserva de Espacio/Evento; (3) Panel DAE/Admin para aprobar clubes (ascendiendo al creador a LIDER_ESTUDIANTIL + aviso Inbox), aprobar eventos validando no solapamiento de espacio/fecha/sede, editar roles de usuarios y visualizar la tabla de RegistroAuditoria.
+
+## 5. Registro y catálogo oficial de carreras (v4)
+
+`core/models.py` define CARRERAS_CHOICES y conserva carr_usu como CharField(max_length=255). Valores y etiquetas exactos:
+
+- Ing. Informática (4 años)
+- Ing. Diseño (4 años)
+- Ing. Mecánica (4 años)
+- Técnico Analista Programador
+- Técnico Enfermería
+- Técnico Mecánica
+- Técnico Diseño
+- Técnico Gastronomía
+
+El registro usa un selector cerrado. Las ingenierías indican 4 años; los técnicos mantienen las etiquetas exactas solicitadas sin inventar duraciones. La migración 0002 no elimina ni transforma valores históricos; la carga demo sí actualiza sus siete cuentas a una carrera válida.
+
+`validar_rut_chileno` limpia puntos/espacios, acepta DV numérico o K, verifica Módulo 11 y devuelve cuerpo-DV (sin ceros iniciales, K mayúscula). El formulario exige RUT válido y comprueba unicidad de rut_usu y corr_usu sin distinguir mayúsculas; el correo se guarda en minúsculas. La vista repite consultas de duplicados y captura IntegrityError dentro de una transacción para mostrar un error Bootstrap si hay una inserción concurrente. Se conservan las restricciones unique existentes en PostgreSQL. Datos históricos ajenos a la demo no se reescriben automáticamente.
+
+Perfil: `/perfil/` permite solo al dueño editar foto/bio; `/perfil/<id>/` es una consulta para usuarios autenticados. `?formato=json` devuelve un resumen autorizado del evento aprobado próximo o más reciente del organizador; JS Vanilla lo actualiza cada 20 segundos. Los contadores e historial “Eventos Asistidos” representan la relación de preinscripción existente: todavía no hay control de asistencia efectiva. Los botones v6 están deshabilitados y rotulados como pendientes.
+
+Memoria técnica acumulativa: [CONTEXTO_VERSIONES.md](CONTEXTO_VERSIONES.md).

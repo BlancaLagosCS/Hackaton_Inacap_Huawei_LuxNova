@@ -1,6 +1,12 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+CARRERAS_CHOICES = [(nombre, nombre) for nombre in (
+    'Ing. Informática (4 años)', 'Ing. Diseño (4 años)', 'Ing. Mecánica (4 años)',
+    'Técnico Analista Programador', 'Técnico Enfermería', 'Técnico Mecánica',
+    'Técnico Diseño', 'Técnico Gastronomía',
+)]
+
 
 # Representa Sede; recibe sus campos y relaciones y produce registros persistentes.
 class Sede(models.Model):
@@ -14,7 +20,7 @@ class Usuario(AbstractUser):
     corr_usu = models.EmailField(unique=True)
     tel_usu = models.CharField(max_length=255)
     sede_usu = models.ForeignKey(Sede, on_delete=models.SET_NULL, null=True, blank=True)
-    carr_usu = models.CharField(max_length=255)
+    carr_usu = models.CharField(max_length=255, choices=CARRERAS_CHOICES)
     anio_usu = models.IntegerField(null=True, blank=True)
     rol_usu = models.CharField(max_length=255, choices=[('ESTUDIANTE', 'ESTUDIANTE'), ('DELEGADO', 'DELEGADO'), ('LIDER_ESTUDIANTIL', 'LIDER_ESTUDIANTIL'), ('JEFATURA', 'JEFATURA'), ('DAE', 'DAE'), ('ADMIN', 'ADMIN')], default='ESTUDIANTE')
     foto_usu = models.ImageField(null=True, blank=True, upload_to='perfiles/')
