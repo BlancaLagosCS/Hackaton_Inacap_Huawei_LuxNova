@@ -53,6 +53,7 @@ class Evento(models.Model):
     sede_even = models.ForeignKey(Sede, on_delete=models.PROTECT)
     esp_even = models.CharField(max_length=255)
     fech_even = models.DateTimeField()
+    ffin_even = models.DateTimeField(null=True, blank=True)
     crea_even = models.ForeignKey(Usuario, on_delete=models.PROTECT)
     est_even = models.CharField(max_length=255, choices=[('PENDIENTE_DAE', 'PENDIENTE_DAE'), ('APROBADO', 'APROBADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE_DAE')
     asis_even = models.ManyToManyField(Usuario, blank=True, related_name='eventos_asistidos')

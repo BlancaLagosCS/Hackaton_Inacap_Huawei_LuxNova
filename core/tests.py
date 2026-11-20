@@ -28,13 +28,89 @@ class ConcurrenciaV6Tests(TransactionTestCase):
         sede = Sede.objects.create(nom_sede='Sede concurrencia ficticia', dir_sede='Demo')
         usuarios = [Usuario.objects.create_user(username=f'dae_concurrente{i}', rut_usu=f'DEMO-CONC-{i}', corr_usu=f'dae{i}@inacap.cl', rol_usu='DAE', sede_usu=sede) for i in range(2)]
         fecha = timezone.now() + timedelta(days=5)
-        eventos = [Evento.objects.create(tit_even=f'Solicitud demo {i}', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=sede, esp_even='Auditorio Principal', fech_even=fecha, crea_even=usuarios[i]) for i in range(2)]
+        eventos = [Evento.objects.create(tit_even=f'Solicitud demo {i}', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=sede, esp_even='Auditorio Principal', fech_even=fecha, ffin_even=fecha + timedelta(hours=2), crea_even=usuarios[i]) for i in range(2)]
         with ThreadPoolExecutor(max_workers=2) as ejecutor:
             tareas = [ejecutor.submit(self.aprobar_en_hilo, u.pk, e.pk) for u, e in zip(usuarios, eventos)]
             self.assertEqual([t.result(timeout=20) for t in tareas], [302, 302])
         self.assertEqual(Evento.objects.filter(est_even='APROBADO').count(), 1)
         self.assertEqual(Evento.objects.filter(est_even='PENDIENTE_DAE').count(), 1)
         self.assertEqual(RegistroAuditoria.objects.count(), 1)
+
+
+# Verifica inicio/término y límites de reservas v8; recibe una BD aislada y devuelve aserciones de formulario, aprobación y visualización.
+class IntervalosV8Tests(TestCase):
+    # Crea DAE, dos sedes e intervalo base futuro; no recibe entradas externas ni devuelve valor.
+    def setUp(self):
+        self.sede = Sede.objects.create(nom_sede='Sede intervalos demo', dir_sede='Ficticia')
+        self.otra = Sede.objects.create(nom_sede='Otra sede intervalos', dir_sede='Ficticia')
+        self.dae = Usuario.objects.create_user(username='dae_v8', rut_usu='DEMO-V8', corr_usu='dae_v8@inacap.cl', rol_usu='DAE', sede_usu=self.sede)
+        self.base = (timezone.now() + timedelta(days=8)).replace(second=0, microsecond=0)
+        self.client.force_login(self.dae)
+
+    # Recibe horas relativas de inicio/fin y campos opcionales; devuelve un evento sintético con intervalo explícito.
+    def evento(self, inicio, fin, **campos):
+        datos = {'tit_even': 'Reserva ficticia', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'sede_even': self.sede, 'esp_even': 'Auditorio Principal', 'crea_even': self.dae, 'fech_even': self.base + timedelta(hours=inicio), 'ffin_even': self.base + timedelta(hours=fin) if fin is not None else None}
+        datos.update(campos)
+        return Evento.objects.create(**datos)
+
+    # Recibe inicio y término relativos; devuelve datos HTML5 de solicitud en hora local.
+    def datos(self, inicio=0, fin=2):
+        return {'tit_even': 'Solicitud v8', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(self.base + timedelta(hours=inicio)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(self.base + timedelta(hours=fin)).strftime('%Y-%m-%dT%H:%M')}
+
+    # Recibe fin igual/anterior/ausente; verifica rechazo de formularios y aceptación de un intervalo futuro válido.
+    def test_orden_y_obligatoriedad(self):
+        from .forms import SolicitarEventoForm
+        for fin in [0, -1]:
+            form = SolicitarEventoForm(self.datos(fin=fin))
+            self.assertFalse(form.is_valid())
+            self.assertIn('La fecha y hora de término debe ser posterior a la de inicio.', form.non_field_errors())
+        datos = self.datos()
+        del datos['ffin_even']
+        self.assertIn('ffin_even', SolicitarEventoForm(datos).errors)
+        form = SolicitarEventoForm(self.datos())
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.fields['ffin_even'].widget.input_type, 'datetime-local')
+
+    # Recibe intervalos con cruce, contención y extremos compartidos; verifica el predicado real sin ventana fija de dos horas.
+    def test_predicado_intervalos(self):
+        from .views import conflicto_espacio
+        self.evento(0, 10, est_even='APROBADO')
+        for inicio, fin in [(3, 4), (-1, 1), (9, 11), (-2, 12), (0, 10)]:
+            self.assertTrue(conflicto_espacio(self.evento(inicio, fin)))
+        for inicio, fin in [(-3, 0), (10, 11), (11, 12)]:
+            self.assertFalse(conflicto_espacio(self.evento(inicio, fin)))
+        self.assertFalse(conflicto_espacio(self.evento(1, 2, sede_even=self.otra)))
+        self.assertFalse(conflicto_espacio(self.evento(1, 2, esp_even='Sala Multiuso 101')))
+
+    # Recibe un cruce mayor a dos horas desde el inicio y uno contiguo; verifica bloqueo real y aprobación válida desde DAE.
+    def test_aprobar_y_crear_directamente(self):
+        self.evento(0, 6, est_even='APROBADO')
+        pendiente = self.evento(4, 5)
+        self.assertContains(self.client.post(reverse('core:resolver_evento', args=[pendiente.pk, 'aprobar']), follow=True), 'Conflicto de espacio:')
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.est_even, 'PENDIENTE_DAE')
+        self.assertFalse(RegistroAuditoria.objects.exists())
+        self.assertContains(self.client.post('/evento/solicitar/', self.datos(4, 5)), 'Conflicto de espacio:')
+        self.assertEqual(Evento.objects.count(), 2)
+        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos(6, 7)), '/perfil/')
+        nuevo = Evento.objects.get(tit_even='Solicitud v8')
+        self.assertEqual(nuevo.est_even, 'APROBADO')
+        self.assertEqual(nuevo.ffin_even, self.base + timedelta(hours=7))
+        self.assertContains(self.client.get('/'), 'Término')
+        self.assertContains(self.client.get('/perfil/'), 'Inicio:')
+
+    # Recibe filas históricas sin término y un término inválido; impide aprobarlas y mantiene ocupación conservadora de las aprobadas.
+    def test_compatibilidad_historica(self):
+        from .views import conflicto_espacio
+        pendiente = self.evento(0, None)
+        url = reverse('core:resolver_evento', args=[pendiente.pk, 'aprobar'])
+        self.assertContains(self.client.post(url, follow=True), 'necesita una fecha de término')
+        Evento.objects.filter(pk=pendiente.pk).update(ffin_even=pendiente.fech_even)
+        self.client.post(url)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.est_even, 'PENDIENTE_DAE')
+        self.evento(0, None, est_even='APROBADO')
+        self.assertTrue(conflicto_espacio(self.evento(5, 6)))
 
 
 # Verifica dominios, buzón y avales v5; recibe una base de pruebas y devuelve resultados de autorización y transición.
@@ -405,7 +481,7 @@ class CierreV6Tests(TestCase):
 
     # Recibe campos opcionales; devuelve un POST de evento futuro con hora local y espacio permitido.
     def datos_evento(self, **cambios):
-        datos = {'tit_even': 'Evento v6', 'desc_even': 'Demostración ficticia', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}
+        datos = {'tit_even': 'Evento v6', 'desc_even': 'Demostración ficticia', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(timezone.now() + timedelta(days=7, hours=2)).strftime('%Y-%m-%dT%H:%M')}
         datos.update(cambios)
         return datos
 
@@ -443,24 +519,24 @@ class CierreV6Tests(TestCase):
         self.client.force_login(self.jefe)
         self.assertContains(self.client.get('/perfil/'), self.estudiante.nom_usu)
 
-    # Crea eventos aprobados y pendientes; verifica conflicto inclusivo de dos horas y separación por sede/espacio.
+    # Crea intervalos aprobados y pendientes; verifica cruce real, aceptación de eventos contiguos y creación directa sin conflicto.
     def test_solapamiento(self):
         base = timezone.now() + timedelta(days=5)
-        aprobado = Evento.objects.create(tit_even='Ocupado', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='Auditorio Principal', fech_even=base, crea_even=self.dae, est_even='APROBADO')
-        pendiente = Evento.objects.create(tit_even='Pendiente', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='auditorio principal', fech_even=base + timedelta(hours=2), crea_even=self.jefe)
+        aprobado = Evento.objects.create(tit_even='Ocupado', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='Auditorio Principal', fech_even=base, ffin_even=base + timedelta(hours=4), crea_even=self.dae, est_even='APROBADO')
+        pendiente = Evento.objects.create(tit_even='Pendiente', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='auditorio principal', fech_even=base + timedelta(hours=3), ffin_even=base + timedelta(hours=5), crea_even=self.jefe)
         self.client.force_login(self.dae)
         url = reverse('core:resolver_evento', args=[pendiente.pk, 'aprobar'])
         self.assertContains(self.client.post(url, follow=True), 'Conflicto de espacio:')
         pendiente.refresh_from_db()
         self.assertEqual(pendiente.est_even, 'PENDIENTE_DAE')
         self.assertFalse(RegistroAuditoria.objects.exists())
-        Evento.objects.filter(pk=pendiente.pk).update(fech_even=base + timedelta(hours=2, seconds=1))
+        Evento.objects.filter(pk=pendiente.pk).update(fech_even=aprobado.ffin_even)
         self.client.post(url)
         pendiente.refresh_from_db()
         self.assertEqual(pendiente.est_even, 'APROBADO')
         self.client.post(url)
         self.assertEqual(RegistroAuditoria.objects.count(), 1)
-        datos = self.datos_evento(fech_even=timezone.localtime(base).strftime('%Y-%m-%dT%H:%M'))
+        datos = self.datos_evento(fech_even=timezone.localtime(base).strftime('%Y-%m-%dT%H:%M'), ffin_even=timezone.localtime(base + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M'))
         self.assertContains(self.client.post('/evento/solicitar/', datos), 'Conflicto de espacio:')
         self.assertEqual(Evento.objects.count(), 2)
         self.assertRedirects(self.client.post('/evento/solicitar/', {**datos, 'esp_even': 'Sala Multiuso 101'}), '/perfil/')

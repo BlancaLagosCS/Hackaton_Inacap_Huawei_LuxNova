@@ -70,18 +70,20 @@ body a { color: #FFFFFF; }
 .alert-error { background: #FFFFFF; color: #9D1916; border: 2px solid #E61E28; }
 
 /* V7: una fila en escritorio, navegación Bootstrap plegable en móvil. */
-.institutional-header, .institutional-header .navbar { background: #FFFFFF; color: #1A1A1A; }
-.institutional-header { border-bottom: 3px solid #E61E28; box-shadow: 0 3px 12px #1A1A1A18; }
-.navbar-content { padding-inline: 5%; }
-.institutional-header .navbar-brand { width: 170px; max-width: 45%; margin-right: 1.5rem; }
-.navbar-logo { max-height: 56px; width: 100%; object-fit: contain; }
-.institutional-header .nav-link, .institutional-header .logo-fallback { color: #1A1A1A; }
-.institutional-header .nav-link:hover, .institutional-header .nav-link:focus { color: #9D1916; }
 .inbox-badge { background: #E61E28; color: #FFFFFF; }
 .view-title { color: #FFFFFF; }
+/* V8: fondo blanco explícito en toda la cabecera y menú, independiente del body. */
+.header-institucional, .header-institucional .navbar, .header-institucional .navbar-nav, .header-institucional .nav-link { background-color: #FFFFFF !important; color: #1A1A1A; }
+.header-institucional { width: 100%; box-shadow: 0 3px 12px #1A1A1A18; }
+.header-institucional .navbar { min-height: 66px; }
+.header-institucional .navbar-brand { flex-shrink: 0; margin-right: 1.25rem; color: #1A1A1A; }
+.header-institucional .navbar-logo { max-height: 46px; width: auto; max-width: 160px; object-fit: contain; }
+.header-institucional .nav-link { white-space: nowrap; }
+.header-institucional .nav-link:hover, .header-institucional .nav-link:focus, .header-institucional .nav-link.active { color: #E61E28; }
+.header-institucional .logo-fallback { color: #1A1A1A; }
+@media (min-width: 992px) { .header-institucional .navbar-nav { flex-wrap: nowrap; } }
+@media (max-width: 991px) { .header-institucional .navbar-nav { padding-block: 1rem; } .header-institucional .dropdown-menu { position: static; } }
 .avatar-perfil { width: 130px; height: 130px; object-fit: cover; border-radius: 50%; border: 3px solid #E61E28; }
 .banner-evento { width: 100%; aspect-ratio: 3 / 1; max-height: 240px; object-fit: cover; }
 .foto-foro { width: 100%; height: auto; max-height: 540px; object-fit: contain; }
 .card .text-muted, .auth-card .text-muted { color: #555 !important; }
-@media (min-width: 1200px) { .navbar-controls, .navbar-controls .navbar-nav { flex-wrap: nowrap; } .navbar-controls .nav-link { white-space: nowrap; } }
-@media (max-width: 1199px) { .navbar-controls { padding-block: 1rem; } .navbar-controls .dropdown-menu { position: static; } }

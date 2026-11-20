@@ -207,12 +207,13 @@ ESPACIOS_CHOICES = [(nombre, nombre) for nombre in ('Auditorio Principal', 'Sala
 # Recibe datos de evento y banner opcional; devuelve una solicitud validada sin permitir elegir creador, sede o aprobación.
 class SolicitarEventoForm(forms.ModelForm):
     esp_even = forms.ChoiceField(choices=ESPACIOS_CHOICES, label='Espacio institucional', widget=forms.Select(attrs={'class': 'form-select'}))
+    ffin_even = forms.DateTimeField(label='Fecha y hora de término', required=True, widget=forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'}))
 
     # Recibe metadatos de Evento y configura sus campos públicos y fecha local HTML5.
     class Meta:
         model = Evento
-        fields = ('tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even')
-        labels = {'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora (Chile)'}
+        fields = ('tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even', 'ffin_even')
+        labels = {'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora de inicio'}
         help_texts = {'ban_even': 'Tamaño recomendado: 1200 × 400 px (formato banner horizontal 3:1, JPG o PNG, máx. 3 MB).'}
         widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
 
@@ -226,3 +227,11 @@ class SolicitarEventoForm(forms.ModelForm):
         if fecha <= timezone.now():
             raise forms.ValidationError('La fecha del evento debe estar en el futuro.')
         return fecha
+
+    # Recibe los campos ya interpretados en hora local; devuelve datos limpios o un error si el término no supera el inicio.
+    def clean(self):
+        datos = super().clean()
+        inicio, termino = datos.get('fech_even'), datos.get('ffin_even')
+        if inicio and termino and termino <= inicio:
+            raise forms.ValidationError('La fecha y hora de término debe ser posterior a la de inicio.')
+        return datos

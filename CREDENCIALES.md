@@ -33,6 +33,6 @@ Preparar sesiones independientes (perfiles de navegador o navegadores separados)
 
 ## Alcance real del piloto
 
-Registro, PostgreSQL, publicaciones, avales, aprobaciones, preinscripciones y auditoría son reales. Las notificaciones externas se simulan exclusivamente mediante Inbox interno. Huawei Cloud RDS/OBS son destino de arquitectura; esta instancia usa PostgreSQL y media locales. “Eventos Asistidos” representa preinscripciones, no control presencial de asistencia. La disponibilidad usa ±2 horas inclusivas respecto de la fecha de inicio, sin un campo de duración.
+Registro, PostgreSQL, publicaciones, avales, aprobaciones, preinscripciones y auditoría son reales. Las notificaciones externas se simulan exclusivamente mediante Inbox interno. Huawei Cloud RDS/OBS son destino de arquitectura; esta instancia usa PostgreSQL y Galeria locales. “Eventos Asistidos” representa preinscripciones, no control presencial de asistencia. Desde v8, las reservas usan inicio y término explícitos: se bloquean intervalos cruzados en la misma sede/espacio, pero se permite iniciar exactamente cuando termina el evento anterior. Cada evento demo tiene dos horas de duración. Una reserva histórica aprobada sin término mantiene ocupado conservadoramente su espacio hasta completar ese dato.
 
 El rol ADMIN de la aplicación está limitado a la sede como DAE; el superusuario root tiene además acceso administrativo Django. Cambiar `rol_usu` en el panel no modifica `is_staff` ni `is_superuser`.

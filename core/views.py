@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
@@ -226,7 +224,9 @@ def resumen_perfil(visitante, perfil_usuario):
                    'telefono': u.tel_usu if puede_ver_contacto(visitante, u) else None,
                    'url': reverse('core:ver_perfil', args=[u.pk])}
                   for u in evento.asis_even.order_by('nom_usu', 'pk')]
-    return {'titulo': evento.tit_even, 'fecha': timezone.localtime(evento.fech_even).strftime('%d/%m/%Y %H:%M'),
+    inicio = timezone.localtime(evento.fech_even).strftime('%d/%m/%Y %H:%M')
+    termino = timezone.localtime(evento.ffin_even).strftime('%d/%m/%Y %H:%M') if evento.ffin_even else 'Sin definir'
+    return {'titulo': evento.tit_even, 'fecha': f'Inicio: {inicio} — Término: {termino}',
             'total': len(asistentes), 'asistentes': asistentes}
 
 
@@ -296,10 +296,10 @@ def contexto_gestion(request, negocio=None):
     return contexto
 
 
-# Recibe un evento; devuelve si existe otro aprobado en el mismo espacio/sede dentro de ±2 horas inclusivas.
+# Recibe un evento con intervalo válido; devuelve si solapa otra reserva aprobada local o una reserva histórica sin término conocido.
 def conflicto_espacio(evento):
     return Evento.objects.filter(sede_even_id=evento.sede_even_id, esp_even__iexact=evento.esp_even.strip(), est_even='APROBADO',
-        fech_even__gte=evento.fech_even - timedelta(hours=2), fech_even__lte=evento.fech_even + timedelta(hours=2)).exclude(pk=evento.pk).exists()
+        fech_even__lt=evento.ffin_even).filter(Q(ffin_even__gt=evento.fech_even) | Q(ffin_even__isnull=True)).exclude(pk=evento.pk).exists()
 
 
 # Recibe GET/POST estudiantil; guarda club, cuatro avales y sus avisos atómicamente y devuelve perfil con confirmación o errores.
@@ -348,7 +348,7 @@ def solicitar_evento(request):
                     evento.est_even = 'APROBADO'
                 evento.save()
                 if directo:
-                    RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Creó y aprobó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; fecha {evento.fech_even.isoformat()}')
+                    RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Creó y aprobó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; inicio {evento.fech_even.isoformat()}; término {evento.ffin_even.isoformat()}')
                 messages.success(request, 'Evento publicado.' if directo else 'Solicitud de espacio y evento enviada a la DAE.')
                 return redirect('core:perfil')
     return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'evento_form': form})
@@ -400,13 +400,16 @@ def aprobar_rechazar_evento(request, evento_id, accion):
         if evento.est_even != 'PENDIENTE_DAE':
             messages.info(request, 'Este evento ya fue resuelto.')
             return redirect('core:perfil')
+        if accion == 'aprobar' and (evento.ffin_even is None or evento.ffin_even <= evento.fech_even):
+            messages.error(request, 'El evento necesita una fecha de término posterior al inicio antes de aprobarse.')
+            return redirect('core:perfil')
         if accion == 'aprobar' and conflicto_espacio(evento):
             messages.error(request, 'Conflicto de espacio: ya existe un evento aprobado en ese espacio y horario.')
             return redirect('core:perfil')
         evento.est_even = 'APROBADO' if accion == 'aprobar' else 'RECHAZADO'
         evento.save(update_fields=['est_even'])
         MensajeInbox.objects.create(dest_inbo=evento.crea_even, tipo_inbo='SISTEMA', asun_inbo='Resolución de evento', cuer_inbo=f'Tu evento {evento.tit_even} fue {evento.est_even.lower()}.')
-        RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Aprobó Evento' if accion == 'aprobar' else 'Rechazó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; fecha {evento.fech_even.isoformat()}; estado {evento.est_even}')
+        RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Aprobó Evento' if accion == 'aprobar' else 'Rechazó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; inicio {evento.fech_even.isoformat()}; término {evento.ffin_even.isoformat() if evento.ffin_even else "Sin definir"}; estado {evento.est_even}')
     messages.success(request, 'Resolución del evento registrada y notificada.')
     return redirect('core:perfil')
 

@@ -1,0 +1,1 @@
+<span class="evento-rango">Inicio: <time datetime="{{ evento.fech_even|date:'c' }}">{{ evento.fech_even|date:'d/m/Y H:i' }}</time> — Término: {% if evento.ffin_even %}<time datetime="{{ evento.ffin_even|date:'c' }}">{{ evento.ffin_even|date:'d/m/Y H:i' }}</time>{% else %}Sin definir{% endif %}</span>

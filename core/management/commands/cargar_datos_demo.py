@@ -41,7 +41,11 @@ class Command(BaseCommand):
             ('Encuentro de clubes · Rancagua', 'SEDE', 7, 'Patio central', 'Conoce a tus compañeros y descubre iniciativas para participar en tu sede.'),
             ('Conecta INACAP · Innovación intersede', 'INTERSEDE', 14, 'Auditorio y encuentro virtual', 'Comparte ideas con estudiantes de todas las sedes en una jornada de innovación.'),
         ]:
-            Evento.objects.get_or_create(tit_even=titulo, sede_even=sedes[0], crea_even=lider, defaults={'desc_even': descripcion, 'cat_even': 'TODO_PUBLICO', 'alc_even': alcance, 'esp_even': espacio, 'fech_even': timezone.now() + timedelta(days=dias), 'est_even': 'APROBADO'})
+            inicio = timezone.now() + timedelta(days=dias)
+            evento, _ = Evento.objects.get_or_create(tit_even=titulo, sede_even=sedes[0], crea_even=lider, defaults={'desc_even': descripcion, 'cat_even': 'TODO_PUBLICO', 'alc_even': alcance, 'esp_even': espacio, 'fech_even': inicio, 'ffin_even': inicio + timedelta(hours=2), 'est_even': 'APROBADO'})
+            if evento.ffin_even is None or evento.ffin_even <= evento.fech_even:
+                evento.ffin_even = evento.fech_even + timedelta(hours=2)
+                evento.save(update_fields=['ffin_even'])
         if not PublicacionForo.objects.filter(sede_publ=sedes[0]).exists():
             estudiante = Usuario.objects.get(username='est1')
             PublicacionForo.objects.create(aut_publ=estudiante, sede_publ=sedes[0], etiq_publ='AHORA_MISMO', tit_publ='¡Nos encontramos en el patio!', cont_publ='Compartimos una jornada de juegos y comunidad en Rancagua. Publicación ficticia de demostración.')
