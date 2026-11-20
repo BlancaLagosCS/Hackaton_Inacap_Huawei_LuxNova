@@ -1,0 +1,88 @@
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+
+
+# Representa Sede; recibe sus campos y relaciones y produce registros persistentes.
+class Sede(models.Model):
+    nom_sede = models.CharField(max_length=255, unique=True)
+    dir_sede = models.CharField(max_length=255)
+
+# Representa Usuario; recibe sus campos y relaciones y produce registros persistentes.
+class Usuario(AbstractUser):
+    nom_usu = models.CharField(max_length=255)
+    rut_usu = models.CharField(max_length=255, unique=True)
+    corr_usu = models.EmailField(unique=True)
+    tel_usu = models.CharField(max_length=255)
+    sede_usu = models.ForeignKey(Sede, on_delete=models.SET_NULL, null=True, blank=True)
+    carr_usu = models.CharField(max_length=255)
+    anio_usu = models.IntegerField(null=True, blank=True)
+    rol_usu = models.CharField(max_length=255, choices=[('ESTUDIANTE', 'ESTUDIANTE'), ('DELEGADO', 'DELEGADO'), ('LIDER_ESTUDIANTIL', 'LIDER_ESTUDIANTIL'), ('JEFATURA', 'JEFATURA'), ('DAE', 'DAE'), ('ADMIN', 'ADMIN')], default='ESTUDIANTE')
+    foto_usu = models.ImageField(null=True, blank=True, upload_to='perfiles/')
+    bio_usu = models.TextField(blank=True)
+
+# Representa Club; recibe sus campos y relaciones y produce registros persistentes.
+class Club(models.Model):
+    nom_club = models.CharField(max_length=255)
+    cat_club = models.CharField(max_length=255, choices=[('VIDA_ESTUDIANTIL', 'VIDA_ESTUDIANTIL'), ('DESARROLLO_ACADEMICO', 'DESARROLLO_ACADEMICO'), ('OTRO', 'OTRO')])
+    desc_club = models.TextField()
+    sede_club = models.ForeignKey(Sede, on_delete=models.PROTECT)
+    lid_club = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    est_club = models.CharField(max_length=255, choices=[('PENDIENTE_AVALES', 'PENDIENTE_AVALES'), ('PENDIENTE_DAE', 'PENDIENTE_DAE'), ('APROBADO', 'APROBADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE_AVALES')
+    fech_club = models.DateTimeField(auto_now_add=True)
+
+# Representa AvalClub; recibe sus campos y relaciones y produce registros persistentes.
+class AvalClub(models.Model):
+    club_aval = models.ForeignKey(Club, on_delete=models.CASCADE, related_name='avales')
+    estu_aval = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    est_aval = models.CharField(max_length=255, choices=[('PENDIENTE', 'PENDIENTE'), ('ACEPTADO', 'ACEPTADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE')
+    fech_aval = models.DateTimeField(null=True, blank=True)
+
+# Representa Evento; recibe sus campos y relaciones y produce registros persistentes.
+class Evento(models.Model):
+    tit_even = models.CharField(max_length=255)
+    desc_even = models.TextField()
+    ban_even = models.ImageField(null=True, blank=True, upload_to='eventos/')
+    cat_even = models.CharField(max_length=255, choices=[('TODO_PUBLICO', 'TODO_PUBLICO'), ('CARRERAS_AFINES', 'CARRERAS_AFINES')])
+    alc_even = models.CharField(max_length=255, choices=[('SEDE', 'SEDE'), ('INTERSEDE', 'INTERSEDE')], default='SEDE')
+    sede_even = models.ForeignKey(Sede, on_delete=models.PROTECT)
+    esp_even = models.CharField(max_length=255)
+    fech_even = models.DateTimeField()
+    crea_even = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    est_even = models.CharField(max_length=255, choices=[('PENDIENTE_DAE', 'PENDIENTE_DAE'), ('APROBADO', 'APROBADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE_DAE')
+    asis_even = models.ManyToManyField(Usuario, blank=True, related_name='eventos_asistidos')
+
+# Representa PublicacionForo; recibe sus campos y relaciones y produce registros persistentes.
+class PublicacionForo(models.Model):
+    aut_publ = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    sede_publ = models.ForeignKey(Sede, on_delete=models.PROTECT)
+    etiq_publ = models.CharField(max_length=255, choices=[('AHORA_MISMO', 'AHORA_MISMO'), ('NOTICIA', 'NOTICIA'), ('INICIATIVA', 'INICIATIVA')], default='AHORA_MISMO')
+    tit_publ = models.CharField(max_length=255, blank=True)
+    cont_publ = models.TextField()
+    img_publ = models.ImageField(null=True, blank=True, upload_to='foro/')
+    fech_publ = models.DateTimeField(auto_now_add=True)
+
+# Representa ComentarioForo; recibe sus campos y relaciones y produce registros persistentes.
+class ComentarioForo(models.Model):
+    publ_come = models.ForeignKey(PublicacionForo, on_delete=models.CASCADE, related_name='comentarios')
+    aut_come = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    cont_come = models.TextField()
+    fech_come = models.DateTimeField(auto_now_add=True)
+
+# Representa MensajeInbox; recibe sus campos y relaciones y produce registros persistentes.
+class MensajeInbox(models.Model):
+    dest_inbo = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='mensajes_recibidos')
+    remi_inbo = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='mensajes_enviados')
+    tipo_inbo = models.CharField(max_length=255, choices=[('SISTEMA', 'SISTEMA'), ('SOLICITUD_AVAL', 'SOLICITUD_AVAL'), ('INICIATIVA_BUZON', 'INICIATIVA_BUZON')])
+    asun_inbo = models.CharField(max_length=255)
+    cuer_inbo = models.TextField()
+    club_inbo = models.ForeignKey(Club, on_delete=models.SET_NULL, null=True, blank=True)
+    publ_inbo = models.ForeignKey(PublicacionForo, on_delete=models.SET_NULL, null=True, blank=True)
+    leid_inbo = models.BooleanField(default=False)
+    fech_inbo = models.DateTimeField(auto_now_add=True)
+
+# Representa RegistroAuditoria; recibe sus campos y relaciones y produce registros persistentes.
+class RegistroAuditoria(models.Model):
+    dae_audi = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    acc_audi = models.CharField(max_length=255)
+    det_audi = models.TextField()
+    fech_audi = models.DateTimeField(auto_now_add=True)
