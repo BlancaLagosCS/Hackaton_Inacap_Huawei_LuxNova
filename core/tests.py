@@ -9,6 +9,96 @@ from .forms import validar_rut_chileno
 from .models import AvalClub, Club, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
 
 
+# Recibe una BD aislada; verifica la portada común, pantallas separadas y accesos a conversaciones y perfiles de v11.
+class PerfilesV11Tests(TestCase):
+    # Prepara personas, publicaciones y eventos sintéticos propios y ajenos; no recibe argumentos ni devuelve valor.
+    def setUp(self):
+        self.sede = Sede.objects.create(nom_sede='Sede v11 ficticia', dir_sede='Demo')
+        self.persona = Usuario.objects.create_user(username='persona_v11', nom_usu='Persona V11', rut_usu='FICTICIO-V11-1', corr_usu='persona_v11@inacap.cl', sede_usu=self.sede, rol_usu='LIDER_ESTUDIANTIL')
+        self.par = Usuario.objects.create_user(username='par_v11', nom_usu='Par V11', rut_usu='FICTICIO-V11-2', corr_usu='par_v11@inacap.cl', sede_usu=self.sede, tel_usu='TELEFONO-PRIVADO-V11')
+        inicio = timezone.now() + timedelta(days=4)
+        self.evento = Evento.objects.create(tit_even='Actividad propia V11', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='Patio Central', fech_even=inicio, ffin_even=inicio + timedelta(hours=1), crea_even=self.persona, est_even='APROBADO')
+        self.ajeno = Evento.objects.create(tit_even='Actividad ajena V11', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='Sala Multiuso 101', fech_even=inicio, ffin_even=inicio + timedelta(hours=1), crea_even=self.par, est_even='PENDIENTE_DAE')
+        self.evento.asis_even.add(self.persona, self.par)
+        PublicacionForo.objects.create(aut_publ=self.persona, sede_publ=self.sede, etiq_publ='NOTICIA', tit_publ='Publicación propia V11', cont_publ='Contenido ficticio')
+        self.client.force_login(self.persona)
+
+    # Recorre los seis roles; verifica agenda antes de publicaciones y herramientas después, sin formulario de creación incrustado.
+    def test_portada_comun_a_todos_los_roles(self):
+        for rol, _ in Usuario._meta.get_field('rol_usu').choices:
+            with self.subTest(rol=rol):
+                Usuario.objects.filter(pk=self.persona.pk).update(rol_usu=rol)
+                respuesta = self.client.get('/perfil/')
+                contenido = respuesta.content.decode()
+                self.assertContains(respuesta, self.evento.tit_even)
+                self.assertContains(respuesta, 'Publicación propia V11')
+                self.assertLess(contenido.index('id="preinscripciones"'), contenido.index('id="publicaciones"'))
+                self.assertLess(contenido.index('id="publicaciones"'), contenido.index('id="organizacion"'))
+                self.assertNotContains(respuesta, 'name="tit_even"')
+                self.assertNotContains(respuesta, 'Panel de Aprobaciones y Auditoría DAE')
+                self.assertEqual(respuesta.context['puede_organizar'], rol in ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'ADMIN'))
+
+    # Consulta organización propia y luego con un rol sin contacto; verifica aislamiento, enlaces y privacidad del teléfono.
+    def test_organizacion_propia_y_preinscritos(self):
+        respuesta = self.client.get('/perfil/organizacion/')
+        self.assertContains(respuesta, self.evento.tit_even)
+        self.assertNotContains(respuesta, self.ajeno.tit_even)
+        self.assertContains(respuesta, 'Ver preinscritos (2)')
+        self.assertContains(respuesta, reverse('core:ver_perfil', args=[self.par.pk]))
+        self.assertContains(respuesta, f'data-dm-usuario="{self.par.pk}"')
+        self.assertContains(respuesta, self.par.tel_usu)
+        Usuario.objects.filter(pk=self.persona.pk).update(rol_usu='ESTUDIANTE')
+        respuesta = self.client.get('/perfil/organizacion/')
+        self.assertContains(respuesta, self.evento.tit_even)
+        self.assertNotContains(respuesta, self.par.tel_usu)
+        self.assertNotContains(respuesta, 'Crear evento')
+
+    # Solicita las pantallas por rol; comprueba que crear y gestionar conservan autorización fuera del perfil.
+    def test_pantallas_separadas_y_permisos(self):
+        self.assertTemplateUsed(self.client.get('/evento/solicitar/'), 'solicitar_evento.html')
+        Usuario.objects.filter(pk=self.persona.pk).update(rol_usu='DAE')
+        self.assertEqual(self.client.get('/evento/solicitar/').status_code, 403)
+        respuesta = self.client.get('/perfil/gestion/')
+        self.assertContains(respuesta, 'Panel de Aprobaciones y Auditoría DAE')
+        self.assertContains(respuesta, self.ajeno.tit_even)
+        self.assertNotContains(respuesta, 'name="tit_even"')
+        self.assertEqual(self.client.get('/panel-admin/crear-cuenta/').status_code, 403)
+        Usuario.objects.filter(pk=self.persona.pk).update(rol_usu='ADMIN')
+        self.assertTemplateUsed(self.client.get('/panel-admin/crear-cuenta/'), 'crear_cuenta_institucional.html')
+        Usuario.objects.filter(pk=self.persona.pk).update(rol_usu='ESTUDIANTE')
+        self.assertEqual(self.client.get('/perfil/gestion/').status_code, 403)
+
+    # Visita un perfil ajeno; verifica envío directo visible, secciones comunes y ausencia de herramientas privadas.
+    def test_perfil_publico_con_acceso_directo_a_dm(self):
+        self.client.force_login(self.par)
+        respuesta = self.client.get(reverse('core:ver_perfil', args=[self.persona.pk]))
+        self.assertContains(respuesta, 'Enviar mensaje')
+        self.assertContains(respuesta, f'data-dm-usuario="{self.persona.pk}"')
+        self.assertContains(respuesta, 'Eventos a los que se preinscribió')
+        self.assertNotContains(respuesta, 'id="organizacion"')
+        self.assertNotContains(respuesta, 'Mi panel de gestión')
+
+    # Abre la entrada a mensajes y destinos manipulados; verifica fallback autenticado y que GET no envía ni marca lecturas.
+    def test_entrada_mensajes_sin_efectos_en_get(self):
+        mensaje = MensajeDirecto.objects.create(emi_mens=self.par, rec_mens=self.persona, cont_mens='Aviso ficticio V11')
+        respuesta = self.client.get('/mensajes/', {'usuario': self.par.pk})
+        self.assertContains(respuesta, f'data-usuario-id="{self.par.pk}"')
+        self.assertContains(respuesta, 'Ver perfil')
+        self.assertContains(respuesta, 'class="dm-flotante"')
+        mensaje.refresh_from_db()
+        self.assertFalse(mensaje.leid_mens)
+        self.assertEqual(MensajeDirecto.objects.filter(emi_mens=self.persona).count(), 0)
+        self.assertEqual(self.client.get('/mensajes/?usuario=abc').status_code, 400)
+        self.assertEqual(self.client.get('/mensajes/', {'usuario': self.persona.pk}).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get('/mensajes/').status_code, 302)
+
+    # Envía el cambio propio DAE a estudiante; verifica que el retorno siga accesible después de perder permisos de gestión.
+    def test_cambio_de_rol_propio_redirige_a_perfil(self):
+        Usuario.objects.filter(pk=self.persona.pk).update(rol_usu='DAE')
+        self.assertRedirects(self.client.post(reverse('core:cambiar_rol', args=[self.persona.pk]), {'rol_usu': 'ESTUDIANTE'}), '/perfil/')
+
+
 # Recibe una BD aislada; verifica configuración propia, altas institucionales, perfil limpio y DM persistente de v10.
 class CuentasV10Tests(TestCase):
     # Prepara actores sintéticos con contraseñas de prueba y sede; no recibe datos externos ni devuelve valor.
@@ -64,7 +154,7 @@ class CuentasV10Tests(TestCase):
     def test_crear_cuentas_institucionales(self):
         self.client.force_login(self.admin)
         for rol, nombre, rut in [('DAE', 'nueva_dae', '44444444-4'), ('JEFATURA', 'nueva_jefatura', '55555555-5')]:
-            self.assertRedirects(self.client.post('/panel-admin/crear-cuenta/', self.cuenta(rol, nombre, rut)), '/perfil/')
+            self.assertRedirects(self.client.post('/panel-admin/crear-cuenta/', self.cuenta(rol, nombre, rut)), '/perfil/gestion/')
             usuario = Usuario.objects.get(username=nombre)
             self.assertEqual(usuario.rol_usu, rol)
             self.assertTrue(usuario.check_password('ClaveInicial-45!'))
@@ -86,7 +176,7 @@ class CuentasV10Tests(TestCase):
         self.assertEqual(self.client.get('/panel-admin/crear-cuenta/').status_code, 200)
         for cambios, campo in [({'username': 'OTRO_V10'}, 'username'), ({'rut_usu': '44444444-5'}, 'rut_usu'), ({'rut_usu': '11.111.111-1'}, 'rut_usu'), ({'corr_usu': 'demo@gmail.com'}, 'corr_usu'), ({'rol_usu': 'ESTUDIANTE'}, 'rol_usu')]:
             respuesta = self.client.post('/panel-admin/crear-cuenta/', {**self.cuenta(), **cambios})
-            self.assertIn(campo, respuesta.context['cuenta_institucional_form'].errors)
+            self.assertIn(campo, respuesta.context['form'].errors)
         self.assertFalse(Usuario.objects.filter(username='nueva_dae').exists())
 
     # Simula fallo de auditoría al crear cuenta; comprueba reversión atómica de usuario y bienvenida oficial.
@@ -127,7 +217,7 @@ class CuentasV10Tests(TestCase):
         respuesta = self.client.get('/perfil/')
         self.assertQuerySetEqual(respuesta.context['proximos_inscritos'], [eventos[0]], transform=None)
         html = respuesta.content.decode()
-        self.assertLess(html.index('Próximos eventos a los que me inscribí'), html.index('Eventos Asistidos</h2>'))
+        self.assertLess(html.index('Eventos a los que me preinscribí'), html.index('Publicaciones realizadas por mí'))
         self.assertRedirects(self.client.post(reverse('core:preinscripcion', args=[eventos[0].pk]), {'volver': 'perfil'}), '/perfil/')
         self.assertFalse(eventos[0].asis_even.filter(pk=self.estudiante.pk).exists())
 
@@ -265,10 +355,10 @@ class MensajeriaV9Tests(TestCase):
         self.assertNotContains(home, self.alicia.rut_usu)
         self.assertNotContains(home, 'Pre-inscribirme')
         self.assertContains(home, 'Distribución temporal por año de ingreso')
-        filas = perfil.context['dashboard_participacion']['barras']
+        filas = self.client.get('/perfil/gestion/').context['dashboard_participacion']['barras']
         self.assertEqual(sum(f['total'] for f in filas), 2)
         self.client.force_login(self.jefe)
-        filas = self.client.get('/perfil/').context['dashboard_participacion']['barras']
+        filas = self.client.get('/perfil/gestion/').context['dashboard_participacion']['barras']
         self.assertEqual(sum(f['total'] for f in filas), 1)
         self.client.force_login(self.alicia)
         self.assertNotContains(self.client.get('/'), 'Consultar RUTs')
@@ -358,12 +448,12 @@ class IntervalosV8Tests(TestCase):
         Usuario.objects.filter(pk=self.dae.pk).update(rol_usu='ADMIN')
         self.assertContains(self.client.post('/evento/solicitar/', self.datos(4, 5)), 'Conflicto de espacio:')
         self.assertEqual(Evento.objects.count(), 2)
-        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos(6, 7)), '/perfil/')
+        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos(6, 7)), '/perfil/organizacion/')
         nuevo = Evento.objects.get(tit_even='Solicitud v8')
         self.assertEqual(nuevo.est_even, 'APROBADO')
         self.assertEqual(nuevo.ffin_even, self.base + timedelta(hours=7))
         self.assertContains(self.client.get('/'), 'Término')
-        self.assertContains(self.client.get('/perfil/'), 'Inicio:')
+        self.assertContains(self.client.get('/perfil/organizacion/'), 'Inicio:')
 
     # Recibe filas históricas sin término y un término inválido; impide aprobarlas y mantiene ocupación conservadora de las aprobadas.
     def test_compatibilidad_historica(self):
@@ -766,7 +856,7 @@ class CierreV6Tests(TestCase):
         self.assertEqual(club.est_club, 'PENDIENTE_DAE')
         self.client.force_login(self.dae)
         url = reverse('core:resolver_club', args=[club.pk, 'aprobar'])
-        self.assertRedirects(self.client.post(url), '/perfil/')
+        self.assertRedirects(self.client.post(url), '/perfil/gestion/')
         club.refresh_from_db()
         self.estudiante.refresh_from_db()
         self.assertEqual(club.est_club, 'APROBADO')
@@ -775,15 +865,15 @@ class CierreV6Tests(TestCase):
         self.client.post(url)
         self.assertEqual(RegistroAuditoria.objects.count(), 1)
         self.client.force_login(self.estudiante)
-        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos_evento()), '/perfil/')
+        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos_evento()), '/perfil/organizacion/')
         evento = Evento.objects.get(tit_even='Evento v6')
         self.assertEqual(evento.est_even, 'PENDIENTE_DAE')
         self.client.force_login(self.dae)
-        self.assertRedirects(self.client.post(reverse('core:resolver_evento', args=[evento.pk, 'aprobar'])), '/perfil/')
+        self.assertRedirects(self.client.post(reverse('core:resolver_evento', args=[evento.pk, 'aprobar'])), '/perfil/gestion/')
         self.assertContains(self.client.get('/'), 'Evento v6')
         self.assertEqual(RegistroAuditoria.objects.count(), 2)
         self.client.force_login(self.jefe)
-        self.assertContains(self.client.get('/perfil/'), self.estudiante.nom_usu)
+        self.assertContains(self.client.get('/perfil/gestion/'), self.estudiante.nom_usu)
 
     # Crea intervalos aprobados y pendientes; verifica cruce real, aceptación de eventos contiguos y creación directa sin conflicto.
     def test_solapamiento(self):
@@ -806,7 +896,7 @@ class CierreV6Tests(TestCase):
         Usuario.objects.filter(pk=self.dae.pk).update(rol_usu='ADMIN')
         self.assertContains(self.client.post('/evento/solicitar/', datos), 'Conflicto de espacio:')
         self.assertEqual(Evento.objects.count(), 2)
-        self.assertRedirects(self.client.post('/evento/solicitar/', {**datos, 'esp_even': 'Sala Multiuso 101'}), '/perfil/')
+        self.assertRedirects(self.client.post('/evento/solicitar/', {**datos, 'esp_even': 'Sala Multiuso 101'}), '/perfil/organizacion/')
         self.assertTrue(Evento.objects.filter(tit_even='Evento v6', est_even='APROBADO').exists())
 
     # Recibe acciones manipuladas y pares ajenos; verifica controles de rol, sede, cuatro avalistas y flags Django.

@@ -122,3 +122,51 @@ body a { color: #FFFFFF; }
 .banner-evento { width: 100%; aspect-ratio: 3 / 1; max-height: 240px; object-fit: cover; }
 .foto-foro { width: 100%; height: auto; max-height: 540px; object-fit: contain; }
 .card .text-muted, .auth-card .text-muted { color: #555 !important; }
+
+/* Perfil: dos secciones principales y herramientas agrupadas, sin formularios en la portada. */
+.perfil-cabecera { padding: 1.75rem; border: 0; border-radius: 20px; margin-bottom: 1.25rem; }
+.perfil-identidad { display: flex; gap: 1.25rem; align-items: center; }
+.perfil-identidad .avatar-perfil { flex-shrink: 0; width: 94px; height: 94px; }
+.perfil-datos { min-width: 0; }
+.perfil-accesos { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; padding-top: 1rem; margin-top: 1rem; border-top: 1px solid #eee; }
+.perfil-contacto summary { cursor: pointer; font-size: .875rem; color: #555; }
+.perfil-secciones { display: flex; gap: .5rem; margin-bottom: 2rem; flex-wrap: wrap; }
+.perfil-secciones a { color: #FFFFFF; border: 1px solid #ffffff50; border-radius: 999px; padding: .55rem 1rem; text-decoration: none; font-size: .875rem; }
+.perfil-secciones a:hover { background: #ffffff15; }
+.perfil-secciones span { margin-left: .3rem; opacity: .8; }
+.perfil-seccion { margin-bottom: 2.5rem; scroll-margin-top: 1rem; }
+.perfil-titulo-seccion { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: 1rem; }
+.perfil-titulo-seccion h2 { font-size: 1.5rem; margin: .35rem 0 0; }
+.perfil-sobrelinea { font-size: .75rem; letter-spacing: .12em; opacity: .8; }
+.perfil-vacio { border-radius: 16px; padding: 1.6rem; border: 1px dashed #ffffff60; background: #ffffff09; }
+.perfil-vacio p { margin: .4rem 0; }
+.perfil-vacio a { font-size: .875rem; }
+.perfil-vacio-icono { font-size: 1.5rem; opacity: .8; }
+.perfil-publicacion { overflow: hidden; border-radius: 16px; border: 0; }
+.perfil-publicacion > img { width: 100%; height: 180px; object-fit: cover; }
+.perfil-herramientas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.perfil-herramienta { display: flex; flex-direction: row; align-items: center; gap: .9rem; padding: 1.2rem; border: 0; border-radius: 16px; text-decoration: none; color: #1A1A1A; transition: transform .2s ease; }
+.perfil-herramienta:hover { transform: translateY(-2px); color: #9D1916; }
+.perfil-herramienta p { color: #666; font-size: .875rem; margin: .3rem 0 0; }
+.perfil-herramienta-icono { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; background: #FBE8E9; border-radius: 12px; color: #9D1916; font-size: 1.5rem; }
+.perfil-desplegable { border: 1px solid #ffffff50; border-radius: 14px; padding: 1rem; }
+.perfil-desplegable summary, .organizacion-inscritos summary { cursor: pointer; font-weight: 600; }
+.organizacion-persona { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .8rem 0; border-top: 1px solid #eee; }
+/* Mensajes visible con texto y SVG local; no depende de la fuente de iconos. */
+.dm-flotante { width: auto; min-width: 148px; height: 56px; padding: 0 1.1rem; display: inline-flex; gap: .6rem; align-items: center; justify-content: center; border-radius: 999px; color: #FFFFFF !important; text-decoration: none; font-weight: 700; bottom: max(24px, env(safe-area-inset-bottom)); }
+.dm-flotante:hover { background: #9D1916; }
+.dm-drawer.offcanvas { display: flex; flex-direction: column; position: fixed; z-index: 1080; visibility: hidden; transform: translateX(110%); }
+.dm-drawer.offcanvas[hidden] { display: none !important; }
+.dm-drawer.offcanvas.show { visibility: visible; transform: none; }
+.dm-overlay { position: fixed; inset: 0; background: #1A1A1A66; z-index: 1070; }
+body.dm-abierto { overflow: hidden; }
+.dm-hilo-header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.dm-contacto { flex: 1; min-width: 0; }
+footer { padding-bottom: 6rem !important; }
+@media (max-width: 600px) { .perfil-cabecera { padding: 1.2rem; } .perfil-identidad { align-items: flex-start; gap: .8rem; } .perfil-identidad .avatar-perfil { width: 64px; height: 64px; } .perfil-herramientas { grid-template-columns: 1fr; } .perfil-titulo-seccion h2 { font-size: 1.25rem; } .dm-flotante { right: 16px; min-width: 138px; } }
+@media (max-width: 600px) {
+  .dm-hilo-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'volver volver' 'persona perfil'; }
+  #dm-volver { grid-area: volver; justify-self: start; margin-bottom: 0; }
+  .dm-contacto { grid-area: persona; overflow-wrap: anywhere; }
+  #dm-ver-perfil { grid-area: perfil; }
+}

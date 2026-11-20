@@ -1,6 +1,62 @@
 const dmConfig = document.getElementById('comunidad-tools');
 const dmDrawer = document.getElementById('dmDrawer');
 const dmEstado = { usuario: null, ocupado: false, enviando: false };
+let dmFocoAnterior = null;
+
+// Recibe ID opcional de persona; abre el drawer sin depender de Bootstrap y carga sus conversaciones o el destinatario indicado.
+async function dmMostrar(usuarioId = null) {
+  if (dmDrawer.hidden) dmFocoAnterior = document.activeElement;
+  dmDrawer.hidden = false;
+  dmDrawer.classList.add('show');
+  dmDrawer.setAttribute('aria-modal', 'true');
+  document.body.classList.add('dm-abierto');
+  if (!document.getElementById('dm-overlay')) {
+    const fondo = document.createElement('div');
+    fondo.id = 'dm-overlay'; fondo.className = 'dm-overlay';
+    fondo.addEventListener('click', dmCerrar);
+    document.body.append(fondo);
+  }
+  (dmEstado.usuario ? document.getElementById('dm-ver-perfil') : document.getElementById('dm-buscar')).focus();
+  try {
+    if (usuarioId) {
+      const datos = await lnJSON(dmURL(usuarioId));
+      await dmAbrirHilo(datos.usuario);
+    }
+    await dmActualizar();
+  } catch (error) { document.getElementById('dm-estado').textContent = error.message; }
+}
+
+// No recibe argumentos; cierra el diálogo, retira su fondo y devuelve el foco al acceso usado.
+function dmCerrar() {
+  dmDrawer.classList.remove('show');
+  dmDrawer.hidden = true;
+  dmDrawer.removeAttribute('aria-modal');
+  document.body.classList.remove('dm-abierto');
+  document.getElementById('dm-overlay')?.remove();
+  if (dmFocoAnterior && document.contains(dmFocoAnterior)) dmFocoAnterior.focus();
+}
+
+// Recibe clic en accesos globales o cierre; abre mensajes por ID o cierra el drawer y evita navegar si JavaScript está activo.
+function dmAccionGlobal(evento) {
+  const abrir = evento.target.closest('[data-dm-open]');
+  if (abrir) { evento.preventDefault(); dmMostrar(abrir.dataset.dmUsuario || null); }
+  if (evento.target.closest('[data-dm-close]')) dmCerrar();
+}
+
+// Recibe una tecla; cierra con Escape y mantiene el recorrido de Tab dentro del diálogo visible.
+function dmTeclado(evento) {
+  if (dmDrawer.hidden) return;
+  if (evento.key === 'Escape') { evento.preventDefault(); dmCerrar(); return; }
+  if (evento.key !== 'Tab') return;
+  const elementos = [...dmDrawer.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled])')].filter(dmElementoVisible);
+  if (!elementos.length) { evento.preventDefault(); dmDrawer.focus(); return; }
+  const primero = elementos[0], ultimo = elementos[elementos.length - 1];
+  if (evento.shiftKey && document.activeElement === primero) { evento.preventDefault(); ultimo.focus(); }
+  if (!evento.shiftKey && document.activeElement === ultimo) { evento.preventDefault(); primero.focus(); }
+}
+
+// Recibe un control DOM; devuelve si está visible y puede participar en el recorrido del teclado.
+function dmElementoVisible(elemento) { return !elemento.hidden && elemento.getClientRects().length > 0; }
 
 // Recibe ID de interlocutor y acción opcional; devuelve la URL interna construida desde la ruta resuelta por Django.
 function dmURL(id, accion = '') { return dmConfig.dataset.dmHilo.replace('/0/', `/${Number(id)}/`) + accion; }
@@ -39,6 +95,8 @@ async function dmAbrirHilo(usuario) {
   dmDrawer.classList.add('dm-hilo-abierto');
   document.getElementById('dm-nombre').textContent = `${usuario.nom_usu || usuario.username} · @${usuario.username}${usuario.oficial ? ' ✓ Oficial' : ''}`;
   document.getElementById('dm-perfil').href = usuario.perfil_url;
+  document.getElementById('dm-ver-perfil').href = usuario.perfil_url;
+  document.getElementById('dm-ver-perfil').hidden = false;
   document.getElementById('dm-avatar').replaceChildren(lnAvatar(usuario));
   document.getElementById('dm-texto').disabled = usuario.oficial;
   document.getElementById('dm-enviar-boton').disabled = usuario.oficial;
@@ -48,6 +106,7 @@ async function dmAbrirHilo(usuario) {
   document.getElementById('dm-resultados').replaceChildren();
   document.getElementById('dm-buscar').value = '';
   document.getElementById('dm-mensajes').replaceChildren();
+  (usuario.oficial ? document.getElementById('dm-ver-perfil') : document.getElementById('dm-texto')).focus();
   try { await dmCargarHilo(true); } catch (error) { document.getElementById('dm-estado').textContent = error.message; }
 }
 
@@ -64,7 +123,7 @@ async function dmCargarHilo(forzarScroll = false) {
   const ultimoVisto = leidos.length ? leidos[leidos.length - 1].id : null;
   caja.replaceChildren();
   for (const mensaje of datos.mensajes) caja.append(dmBurbuja(mensaje, ultimoVisto));
-  if (!datos.mensajes.length) caja.textContent = 'Aún no hay mensajes. Comienza una conversación.';
+  if (!datos.mensajes.length) caja.textContent = dmEstado.usuario.oficial ? 'Tus notificaciones del sistema aparecerán aquí.' : 'Aún no hay mensajes. Comienza una conversación.';
   caja.scrollTop = forzarScroll || alFinal ? caja.scrollHeight : posicion;
   const recibidos = datos.mensajes.filter(dmEsRecibidoPendiente);
   if (recibidos.length) {
@@ -116,8 +175,7 @@ async function dmActualizar() {
   try {
     const usuarios = await dmCargarConversaciones();
     if (dmDrawer.classList.contains('show')) {
-      if (!dmEstado.usuario && usuarios.length) await dmAbrirHilo(usuarios[0]);
-      else await dmCargarHilo();
+      if (dmEstado.usuario) await dmCargarHilo();
     }
   } catch (error) { document.getElementById('dm-estado').textContent = error.message; }
   finally { dmEstado.ocupado = false; }
@@ -133,6 +191,14 @@ async function dmEnviarMensaje(evento) {
   const id = dmEstado.usuario.id;
   dmEstado.enviando = true;
   document.getElementById('dm-enviar-boton').disabled = true;
+  document.getElementById('dm-nombre').textContent = 'Selecciona una conversación';
+  document.getElementById('dm-perfil').removeAttribute('href');
+  document.getElementById('dm-avatar').replaceChildren();
+  document.getElementById('dm-mensajes').replaceChildren();
+  document.getElementById('dm-texto').value = '';
+  document.getElementById('dm-canal-oficial').hidden = true;
+  document.getElementById('dm-estado').textContent = '';
+  document.getElementById('dm-buscar').focus();
   try {
     await dmPOST(dmURL(id, 'enviar/'), { cont_mens: texto });
     if (dmEstado.usuario && dmEstado.usuario.id === id) { entrada.value = ''; await dmCargarHilo(true); }
@@ -146,11 +212,20 @@ async function dmEnviarMensaje(evento) {
 }
 
 // No recibe argumentos; vuelve a la lista en móvil y evita marcar lecturas de un hilo que dejó de estar visible.
-function dmVolverALista() { dmDrawer.classList.remove('dm-hilo-abierto'); dmEstado.usuario = null; }
+function dmVolverALista() {
+  dmDrawer.classList.remove('dm-hilo-abierto');
+  dmEstado.usuario = null;
+  document.getElementById('dm-ver-perfil').hidden = true;
+  document.getElementById('dm-texto').disabled = true;
+  document.getElementById('dm-enviar-boton').disabled = true;
+}
 
 document.getElementById('dm-enviar').addEventListener('submit', dmEnviarMensaje);
 document.getElementById('dm-volver').addEventListener('click', dmVolverALista);
-dmDrawer.addEventListener('shown.bs.offcanvas', dmActualizar);
+document.addEventListener('click', dmAccionGlobal);
+document.addEventListener('keydown', dmTeclado);
 lnConectarBusqueda(document.getElementById('dm-buscar'), document.getElementById('dm-resultados'), false, dmAbrirHilo);
 setInterval(dmActualizar, 5000);
 dmActualizar();
+const dmPagina = document.getElementById('mensajeria-page');
+if (dmPagina) dmMostrar(dmPagina.dataset.usuarioId || null);
