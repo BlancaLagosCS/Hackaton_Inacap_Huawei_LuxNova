@@ -48,7 +48,8 @@
 * **Base de Datos:** **PostgreSQL** local (`hackaton_luxnova` conectado en `config/settings.py` vía `psycopg2-binary`), preparado para migrar a **Huawei Cloud RDS for PostgreSQL**.
 * **Almacenamiento Multimedia:** `Pillow` + `ImageField` en `media/` local (nunca escribir rutas de archivos a mano para permitir migración directa a **Huawei OBS** con `django-storages`).
 * **Frontend:** HTML5 + **Bootstrap 5 (CDN)** + CSS3 (`static/css/estilos.css`) + **JavaScript Vanilla puro** (`static/js/animaciones.js`).
-* **Paleta Institucional INACAP:** Rojo primario `#E30613`, Negro/Carbón `#1A1A1A`, Blanco `#FFFFFF`. *(Mantener reservado `<!-- ESPACIO LOGO INSTITUCIONAL AQUI -->` en `templates/base.html` hasta integrar el logo oficial).*
+* **Diseño oficial Blanca (vigente desde v5):** Fondo general `#9D1916` con texto `#FFFFFF`; botones/acento/bordes `#E61E28` con texto blanco; acento suave y buscador `#E9A0A2` con texto `#1A1A1A`. Tarjetas, formularios, modales y superficies de contenido blancos con texto negro. Roboto Regular 400 para texto, Light 300 para metadatos, Italic 400 para cursivas; títulos y destacados `'Myriad Pro', 'Roboto', sans-serif` en 700. Roboto se importa desde Google Fonts; Myriad Pro usa la instalación local si existe, sin distribuir fuentes licenciadas.
+* **Header y navegación v5:** Buscador funcional `?q=` en Home o Foro, avatar circular con exactamente “Mi cuenta”, “Mis publicaciones” y “Log Out” (POST), título de vista centrado y LogoInacap a la derecha con `width: 20%`. Conservar `<!-- ESPACIO LOGO INSTITUCIONAL AQUI (LogoInacap 20% width) -->` hasta recibir el logo. Navbar inferior con margen lateral 5% por lado y cuatro enlaces: Inicio (`/`), Foro (`/foro/`), Actividades (`/#actividades`) y Buzón de sugerencias (`/inbox/`, badge de no leídos).
 
 ### 4.2. Estructura del Repositorio
 ```text
@@ -90,7 +91,7 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
   - Alcance: Ruta /foro/ filtrada por sede_usu, publicaciones cronológicas con foto opcional, comentarios y regla automática: al publicar con etiqueta INICIATIVA, se envía un MensajeInbox (INICIATIVA_BUZON) con correo y teléfono del autor a todos los LIDER_ESTUDIANTIL y DAE de la sede.
 - v4 — Perfiles Estilo Instagram (Propio y Público) + Métricas de Asistencia [COMPLETADA]:
   - Alcance: Rutas /perfil/ y /perfil/<id>/ con foto circular, bio editable, insignia de rol, carrera, año, sede, privacidad estricta de tel_usu (solo visible para Líderes, Delegados, Jefatura y DAE), historial público de eventos asistidos/organizados y tarjeta resumen en vivo del próximo evento para Líderes/DAE.
-- v5 — Inbox del Sistema (Chat Oficial + Confirmación de 4 Avales + Buzón Iniciativas) [PENDIENTE]:
+- v5 — Inbox del Sistema (Chat Oficial + Confirmación de 4 Avales + Buzón Iniciativas) [COMPLETADA]:
   - Alcance: Ruta /inbox/ con badge de no leídos, mensajes oficiales del Sistema con botones Aceptar / Rechazar Aval (al llegar a 4 avales aceptados, el Club escala automáticamente a PENDIENTE_DAE y notifica a la DAE) y pestaña Buzón de Iniciativas visible solo para Líderes y DAE.
 - v6 — Postulación a Club, Reserva de Espacios (Sin Solapamientos) y Panel/Auditoría DAE [VERSIÓN FINAL - PENDIENTE]:
   - Alcance: Formularios integrados en Mi Perfil según rol: (1) Postulación a Club seleccionando 4 compañeros de sede; (2) Solicitud de Reserva de Espacio/Evento; (3) Panel DAE/Admin para aprobar clubes (ascendiendo al creador a LIDER_ESTUDIANTIL + aviso Inbox), aprobar eventos validando no solapamiento de espacio/fecha/sede, editar roles de usuarios y visualizar la tabla de RegistroAuditoria.
@@ -115,3 +116,13 @@ El registro usa un selector cerrado. Las ingenierías indican 4 años; los técn
 Perfil: `/perfil/` permite solo al dueño editar foto/bio; `/perfil/<id>/` es una consulta para usuarios autenticados. `?formato=json` devuelve un resumen autorizado del evento aprobado próximo o más reciente del organizador; JS Vanilla lo actualiza cada 20 segundos. Los contadores e historial “Eventos Asistidos” representan la relación de preinscripción existente: todavía no hay control de asistencia efectiva. Los botones v6 están deshabilitados y rotulados como pendientes.
 
 Memoria técnica acumulativa: [CONTEXTO_VERSIONES.md](CONTEXTO_VERSIONES.md).
+
+## 6. Inbox, avales y dominios institucionales (v5)
+
+Registro: corr_usu se normaliza a minúsculas y admite exclusivamente dominios exactos `inacapmail.cl` e `inacap.cl`. Se rechazan dominios externos, subdominios y sufijos engañosos, además de duplicados. Demo: estudiantes/líder en @inacapmail.cl y DAE en @inacap.cl; datos siempre sintéticos. No se modifican automáticamente las cuentas ajenas a la demo.
+
+`/inbox/` muestra exclusivamente mensajes recibidos por el usuario. Al abrir, marca avisos del sistema y solicitudes resueltas como leídos; solicitudes con AvalClub pendiente siguen sin leer y destacadas. La pestaña de iniciativas solo se consulta y renderiza para LIDER_ESTUDIANTIL, DELEGADO, JEFATURA, DAE o ADMIN, con mensajes dirigidos al usuario y publicación de su sede actual. La generación automática del foro conserva los destinatarios de v3: Líderes y DAE de esa sede. Los demás roles autorizados solo ven iniciativas si fueron destinatarios; no se concede acceso general a mensajes ajenos.
+
+`/inbox/aval/<id>/` solo acepta POST con CSRF y dueño del aval en la misma sede del club. Se almacena una única respuesta ACEPTADO/RECHAZADO con fecha; no se puede cambiar una respuesta ni actuar sobre clubes cerrados. Una transacción con bloqueo del club serializa las respuestas concurrentes. Exactamente cuatro estudiantes distintos, de la sede y diferentes del creador, deben aceptar para pasar a PENDIENTE_DAE; se notifica una sola vez al creador y a cada DAE de la sede. Rechazar avisa al creador y deja el club en espera de avales, sin aprobación automática.
+
+La demo agrega un club de est1 y solicita aval a est2–est5; repetir la carga no reinicia respuestas ni duplica avales o mensajes. V6 sigue pendiente: postulación a club desde Mi Perfil, reserva/evento y Panel de Aprobaciones/Auditoría DAE.

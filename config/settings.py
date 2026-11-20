@@ -25,8 +25,12 @@ SECRET_KEY = 'django-insecure-sq0rlwt7&cuq$qmz_(454yj^sh3w-_w#j!_pe41u+9%x8aims1
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['luxnova.cl', 'www.luxnova.cl', 'localhost', '127.0.0.1']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://luxnova.cl',
+    'https://www.luxnova.cl',
+]
 
 # Application definition
 

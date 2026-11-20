@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import CARRERAS_CHOICES, Evento, PublicacionForo, Sede, Usuario
+from core.models import AvalClub, CARRERAS_CHOICES, Club, Evento, MensajeInbox, PublicacionForo, Sede, Usuario
 from core.services import notificar_iniciativa
 
 
@@ -23,7 +23,8 @@ class Command(BaseCommand):
         cuentas += [(f'est{i}', 'ESTUDIANTE', f'Estudiante Demo {i}') for i in range(1, 6)]
         creadas = 0
         for indice, (username, rol, nombre) in enumerate(cuentas, start=1):
-            usuario, nuevo = Usuario.objects.get_or_create(username=username, defaults={'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': f'{username}@demo.inacap.cl', 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0], 'anio_usu': timezone.localdate().year, 'rol_usu': rol})
+            correo = f"{username}@{'inacap.cl' if rol == 'DAE' else 'inacapmail.cl'}"
+            usuario, nuevo = Usuario.objects.get_or_create(username=username, defaults={'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': correo, 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0], 'anio_usu': timezone.localdate().year, 'rol_usu': rol})
             if nuevo:
                 usuario.set_password('1234')
                 usuario.save()
@@ -31,7 +32,8 @@ class Command(BaseCommand):
             # Actualiza solo los datos sintéticos de estas cuentas demo; conserva sus contraseñas y relaciones.
             usuario.rut_usu = f'{str(indice) * 8}-{indice}'
             usuario.carr_usu = CARRERAS_CHOICES[0][0]
-            usuario.save(update_fields=['rut_usu', 'carr_usu'])
+            usuario.corr_usu = correo
+            usuario.save(update_fields=['rut_usu', 'carr_usu', 'corr_usu'])
         lider = Usuario.objects.get(username='lider_rancagua')
         for titulo, alcance, dias, espacio, descripcion in [
             ('Encuentro de clubes · Rancagua', 'SEDE', 7, 'Patio central', 'Conoce a tus compañeros y descubre iniciativas para participar en tu sede.'),
@@ -43,4 +45,14 @@ class Command(BaseCommand):
             PublicacionForo.objects.create(aut_publ=estudiante, sede_publ=sedes[0], etiq_publ='AHORA_MISMO', tit_publ='¡Nos encontramos en el patio!', cont_publ='Compartimos una jornada de juegos y comunidad en Rancagua. Publicación ficticia de demostración.')
             iniciativa = PublicacionForo.objects.create(aut_publ=estudiante, sede_publ=sedes[0], etiq_publ='INICIATIVA', tit_publ='Taller de programación entre pares', cont_publ='Proponemos un taller colaborativo para aprender Python. Iniciativa ficticia de demostración.')
             notificar_iniciativa(iniciativa)
-        self.stdout.write(self.style.SUCCESS(f'Demo disponible: 3 sedes, 7 cuentas, 2 eventos y foro inicial de Rancagua. Cuentas nuevas: {creadas}. Contraseña inicial demo: 1234.'))
+        proponente = Usuario.objects.get(username='est1')
+        club, _ = Club.objects.get_or_create(nom_club='Club Demo de Innovación LuxNova', lid_club=proponente, sede_club=sedes[0], defaults={'cat_club': 'DESARROLLO_ACADEMICO', 'desc_club': 'Club ficticio para demostrar cuatro avales de pares.'})
+        for numero in range(2, 6):
+            estudiante = Usuario.objects.get(username=f'est{numero}')
+            AvalClub.objects.get_or_create(club_aval=club, estu_aval=estudiante)
+            MensajeInbox.objects.get_or_create(dest_inbo=estudiante, club_inbo=club, tipo_inbo='SOLICITUD_AVAL', defaults={'asun_inbo': 'Solicitud de aval de club', 'cuer_inbo': f'{proponente.nom_usu} solicita tu aval para {club.nom_club}. Acepta o rechaza desde tu buzón.'})
+        # Actualiza los contactos de avisos demo existentes después del cambio de dominio, sin duplicar mensajes.
+        for publicacion in PublicacionForo.objects.filter(aut_publ=proponente, etiq_publ='INICIATIVA'):
+            cuerpo = f'{publicacion.cont_publ}\n\nContacto del proponente:\nNombre: {proponente.nom_usu}\nCarrera: {proponente.carr_usu}\nCorreo: {proponente.corr_usu}\nTeléfono: {proponente.tel_usu}'
+            MensajeInbox.objects.filter(publ_inbo=publicacion, tipo_inbo='INICIATIVA_BUZON').update(cuer_inbo=cuerpo)
+        self.stdout.write(self.style.SUCCESS(f'Demo disponible: 3 sedes, 7 cuentas, 2 eventos, foro y club con 4 solicitudes de aval. Cuentas nuevas: {creadas}. Contraseña inicial demo: 1234.'))

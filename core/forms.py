@@ -58,6 +58,8 @@ class RegistroForm(UserCreationForm):
     # Recibe el correo validado sintácticamente; devuelve su forma normalizada o un error por duplicado.
     def clean_corr_usu(self):
         correo = self.cleaned_data['corr_usu'].strip().lower()
+        if correo.rsplit('@', 1)[-1] not in ('inacapmail.cl', 'inacap.cl'):
+            raise forms.ValidationError('El correo debe ser institucional (@inacapmail.cl o @inacap.cl).')
         if Usuario.objects.filter(corr_usu__iexact=correo).exists():
             raise forms.ValidationError('Este correo institucional ya está registrado.')
         return correo

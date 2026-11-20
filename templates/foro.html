@@ -7,10 +7,10 @@
 <section class="card border-0 shadow-sm p-4 mb-4" aria-labelledby="crear-publicacion"><h2 id="crear-publicacion" class="h4">Tu comunidad tiene algo que contar</h2><p class="text-secondary">Con #Iniciativa, tu propuesta y tus datos de contacto se envían de forma privada a los Líderes y DAE de tu sede.</p>
 <form method="post" action="{% url 'core:foro' %}" enctype="multipart/form-data">{% csrf_token %}{% include 'partials/formulario.html' %}<img id="vista-previa-foro" class="img-fluid rounded mb-3" alt="Vista previa de la foto seleccionada" hidden><button class="btn btn-primary">Publicar en mi sede</button></form></section>
 <nav class="d-flex flex-wrap gap-2 mb-4" aria-label="Filtrar publicaciones">
-<a class="btn {% if not etiqueta %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}">Todas</a>
-<a class="btn {% if etiqueta == 'AHORA_MISMO' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=AHORA_MISMO">#AhoraMismo</a>
-<a class="btn {% if etiqueta == 'NOTICIA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=NOTICIA">#Noticia</a>
-<a class="btn {% if etiqueta == 'INICIATIVA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=INICIATIVA">#Iniciativa</a></nav>
+<a class="btn {% if not etiqueta %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?q={{ busqueda_actual|urlencode }}">Todas</a>
+<a class="btn {% if etiqueta == 'AHORA_MISMO' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=AHORA_MISMO&amp;q={{ busqueda_actual|urlencode }}">#AhoraMismo</a>
+<a class="btn {% if etiqueta == 'NOTICIA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=NOTICIA&amp;q={{ busqueda_actual|urlencode }}">#Noticia</a>
+<a class="btn {% if etiqueta == 'INICIATIVA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=INICIATIVA&amp;q={{ busqueda_actual|urlencode }}">#Iniciativa</a></nav>
 <section aria-label="Publicaciones de tu sede">
 {% for publicacion in publicaciones %}
 <article id="publicacion-{{ publicacion.pk }}" class="card event-card event-reveal mb-4">

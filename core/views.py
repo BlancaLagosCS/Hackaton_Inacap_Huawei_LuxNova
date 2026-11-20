@@ -11,17 +11,23 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from .forms import ComentarioForoForm, EditarPerfilForm, PublicacionForoForm, RegistroUsuarioForm
-from .models import Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, Usuario
+from .models import AvalClub, Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, Usuario
 from .services import notificar_iniciativa
 
 
 # Recibe una petición y devuelve bienvenida o eventos futuros aprobados por alcance y sede.
 def home(request):
     contexto = {}
+    busqueda = request.GET.get('q', '').strip()[:200]
     if request.user.is_authenticated:
         inscripciones = Evento.asis_even.through.objects.filter(evento_id=OuterRef('pk'), usuario_id=request.user.pk)
         eventos = Evento.objects.filter(est_even='APROBADO', fech_even__gte=timezone.now()).select_related('sede_even', 'crea_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
-        contexto = {'eventos_sede': eventos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(), 'eventos_intersede': eventos.filter(alc_even='INTERSEDE')}
+        if busqueda:
+            eventos = eventos.filter(Q(tit_even__icontains=busqueda) | Q(desc_even__icontains=busqueda))
+        clubes = Club.objects.filter(sede_club_id=request.user.sede_usu_id, est_club='APROBADO').select_related('lid_club') if request.user.sede_usu_id else Club.objects.none()
+        if busqueda:
+            clubes = clubes.filter(Q(nom_club__icontains=busqueda) | Q(desc_club__icontains=busqueda))
+        contexto = {'eventos_sede': eventos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(), 'eventos_intersede': eventos.filter(alc_even='INTERSEDE'), 'clubes_activos': clubes}
     return render(request, 'home.html', contexto)
 
 
@@ -90,6 +96,9 @@ def contexto_foro(request, formulario=None, comentario=None, publicacion_error=N
         ).order_by('-fech_publ', '-pk')
         if etiqueta:
             publicaciones = publicaciones.filter(etiq_publ=etiqueta)
+        busqueda = request.GET.get('q', '').strip()[:200]
+        if busqueda:
+            publicaciones = publicaciones.filter(Q(tit_publ__icontains=busqueda) | Q(cont_publ__icontains=busqueda))
     return {'publicaciones': publicaciones, 'form': formulario if formulario is not None else PublicacionForoForm(),
             'comentario_form': comentario, 'publicacion_error': publicacion_error, 'etiqueta': etiqueta}
 
@@ -135,11 +144,64 @@ def comentar_publicacion(request, publ_id):
     return render(request, 'foro.html', contexto_foro(request, comentario=form, publicacion_error=publicacion.pk), status=400)
 
 
-# Recibe una petición autenticada; devuelve exclusivamente los mensajes dirigidos al usuario.
+# Recibe GET autenticado; marca avisos visibles como leídos y devuelve notificaciones propias y el buzón autorizado por sede.
 @login_required
-def inbox(request):
-    mensajes = MensajeInbox.objects.filter(dest_inbo=request.user).order_by('-fech_inbo')
-    return render(request, 'inbox.html', {'mensajes_inbox': mensajes})
+@require_http_methods(['GET'])
+def buzon_inbox(request):
+    recibidos = MensajeInbox.objects.filter(dest_inbo=request.user)
+    pendientes = AvalClub.objects.filter(estu_aval=request.user, est_aval='PENDIENTE', club_aval_id=OuterRef('club_inbo_id'))
+    solicitudes = recibidos.filter(tipo_inbo='SOLICITUD_AVAL').annotate(pendiente=Exists(pendientes))
+    recibidos.filter(tipo_inbo='SISTEMA').update(leid_inbo=True)
+    solicitudes.filter(pendiente=False).update(leid_inbo=True)
+    solicitudes.filter(pendiente=True).update(leid_inbo=False)
+    puede_ver_iniciativas = request.user.rol_usu in ROLES_GESTION
+    iniciativas = recibidos.none()
+    if puede_ver_iniciativas and request.user.sede_usu_id:
+        iniciativas = recibidos.filter(tipo_inbo='INICIATIVA_BUZON', publ_inbo__sede_publ_id=request.user.sede_usu_id)
+        iniciativas.update(leid_inbo=True)
+    avales = {a.club_aval_id: a for a in AvalClub.objects.filter(estu_aval=request.user).order_by('-pk')}
+    notificaciones = list(recibidos.filter(tipo_inbo__in=['SISTEMA', 'SOLICITUD_AVAL']).select_related('club_inbo').order_by('-fech_inbo', '-pk'))
+    for mensaje in notificaciones:
+        mensaje.aval = avales.get(mensaje.club_inbo_id) if mensaje.tipo_inbo == 'SOLICITUD_AVAL' else None
+    return render(request, 'inbox.html', {'notificaciones': notificaciones,
+        'iniciativas': iniciativas.select_related('publ_inbo__aut_publ').order_by('-fech_inbo', '-pk'),
+        'puede_ver_iniciativas': puede_ver_iniciativas})
+
+
+# Recibe POST del dueño del aval y su decisión; registra una respuesta única, escala tras cuatro pares y devuelve redirección.
+@login_required
+@require_POST
+def responder_aval(request, aval_id):
+    decision = request.POST.get('decision')
+    if decision not in ('ACEPTADO', 'RECHAZADO'):
+        return JsonResponse({'error': 'Selecciona aceptar o rechazar.'}, status=400)
+    with transaction.atomic():
+        referencia = get_object_or_404(AvalClub, pk=aval_id, estu_aval=request.user)
+        club = get_object_or_404(Club.objects.select_for_update(), pk=referencia.club_aval_id)
+        aval = AvalClub.objects.select_for_update().get(pk=referencia.pk)
+        if not request.user.sede_usu_id or request.user.sede_usu_id != club.sede_club_id or club.lid_club_id == request.user.pk:
+            return HttpResponseForbidden('Solo los compañeros de la sede pueden responder este aval.')
+        if aval.est_aval != 'PENDIENTE' or club.est_club != 'PENDIENTE_AVALES':
+            messages.info(request, 'Esta solicitud ya fue respondida o cerrada.')
+            return redirect('core:inbox')
+        aval.est_aval = decision
+        aval.fech_aval = timezone.now()
+        aval.save(update_fields=['est_aval', 'fech_aval'])
+        MensajeInbox.objects.filter(dest_inbo=request.user, club_inbo=club, tipo_inbo='SOLICITUD_AVAL').update(leid_inbo=True)
+        if decision == 'RECHAZADO':
+            MensajeInbox.objects.create(dest_inbo=club.lid_club, tipo_inbo='SISTEMA', club_inbo=club,
+                asun_inbo='Aval de club rechazado', cuer_inbo=f'{request.user.nom_usu or request.user.username} rechazó el aval para {club.nom_club}.')
+        else:
+            avales = list(club.avales.select_related('estu_aval'))
+            if (len(avales) == 4 and len({a.estu_aval_id for a in avales}) == 4
+                    and all(a.est_aval == 'ACEPTADO' and a.estu_aval.sede_usu_id == club.sede_club_id and a.estu_aval_id != club.lid_club_id for a in avales)):
+                club.est_club = 'PENDIENTE_DAE'
+                club.save(update_fields=['est_club'])
+                destinatarios = Usuario.objects.filter(Q(rol_usu='DAE', sede_usu_id=club.sede_club_id) | Q(pk=club.lid_club_id)).distinct()
+                MensajeInbox.objects.bulk_create([MensajeInbox(dest_inbo=u, tipo_inbo='SISTEMA', club_inbo=club,
+                    asun_inbo='Club listo para revisión DAE', cuer_inbo=f'{club.nom_club} completó sus 4 avales y está listo para revisión de la DAE.') for u in destinatarios])
+    messages.success(request, 'Tu respuesta al aval fue registrada.')
+    return redirect('core:inbox')
 
 
 ROLES_GESTION = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'DAE', 'ADMIN')
@@ -179,6 +241,7 @@ def mostrar_perfil(request, perfil_usuario, form=None):
         'puede_ver_telefono': puede_ver_contacto(request.user, perfil_usuario), 'es_gestor': perfil_usuario.rol_usu in ROLES_GESTION,
         'eventos_asistidos': asistidos, 'eventos_organizados': organizados,
         'clubes_liderados': Club.objects.filter(lid_club=perfil_usuario, est_club='APROBADO'),
+        'publicaciones_perfil': PublicacionForo.objects.filter(aut_publ=perfil_usuario, sede_publ_id=request.user.sede_usu_id).order_by('-fech_publ') if request.user.sede_usu_id else PublicacionForo.objects.none(),
         'publicaciones_count': PublicacionForo.objects.filter(aut_publ=perfil_usuario).count(),
         'resumen': resumen, 'perfil_form': form})
 
