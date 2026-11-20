@@ -2,7 +2,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 CARRERAS_CHOICES = [(nombre, nombre) for nombre in (
-    'Ing. Informática (4 años)', 'Ing. Diseño (4 años)', 'Ing. Mecánica (4 años)',
+    'Ing. Informática', 'Ing. Diseño', 'Ing. Mecánica',
     'Técnico Analista Programador', 'Técnico Enfermería', 'Técnico Mecánica',
     'Técnico Diseño', 'Técnico Gastronomía',
 )]
@@ -21,7 +21,6 @@ class Usuario(AbstractUser):
     tel_usu = models.CharField(max_length=255)
     sede_usu = models.ForeignKey(Sede, on_delete=models.SET_NULL, null=True, blank=True)
     carr_usu = models.CharField(max_length=255, choices=CARRERAS_CHOICES)
-    anio_usu = models.IntegerField(null=True, blank=True)
     rol_usu = models.CharField(max_length=255, choices=[('ESTUDIANTE', 'ESTUDIANTE'), ('DELEGADO', 'DELEGADO'), ('LIDER_ESTUDIANTIL', 'LIDER_ESTUDIANTIL'), ('JEFATURA', 'JEFATURA'), ('DAE', 'DAE'), ('ADMIN', 'ADMIN')], default='ESTUDIANTE')
     foto_usu = models.ImageField(null=True, blank=True, upload_to='perfiles/')
     bio_usu = models.TextField(blank=True)
@@ -35,6 +34,20 @@ class Club(models.Model):
     lid_club = models.ForeignKey(Usuario, on_delete=models.PROTECT)
     est_club = models.CharField(max_length=255, choices=[('PENDIENTE_AVALES', 'PENDIENTE_AVALES'), ('PENDIENTE_DAE', 'PENDIENTE_DAE'), ('APROBADO', 'APROBADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE_AVALES')
     fech_club = models.DateTimeField(auto_now_add=True)
+    miem_club = models.ManyToManyField(Usuario, through='MembresiaClub', related_name='clubes_miembro', blank=True)
+
+
+# Recibe club y usuario; conserva su membresía única y su baja para mantener el historial de eventos accesible.
+class MembresiaClub(models.Model):
+    club_memb = models.ForeignKey(Club, on_delete=models.CASCADE, related_name='membresias')
+    usu_memb = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='membresias_club')
+    acti_memb = models.BooleanField(default=True)
+    fech_memb = models.DateTimeField(auto_now_add=True)
+    baja_memb = models.DateTimeField(null=True, blank=True)
+
+    # Recibe metadatos de membresía; impide duplicar la relación entre el mismo club y usuario.
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['club_memb', 'usu_memb'], name='club_usuario_membresia_unica')]
 
 # Representa AvalClub; recibe sus campos y relaciones y produce registros persistentes.
 class AvalClub(models.Model):
@@ -55,8 +68,14 @@ class Evento(models.Model):
     fech_even = models.DateTimeField()
     ffin_even = models.DateTimeField(null=True, blank=True)
     crea_even = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    orga_even = models.CharField(max_length=16, choices=[('PERSONAL', 'A título personal'), ('CLUB', 'En nombre de un club estudiantil')], default='PERSONAL')
+    club_even = models.ForeignKey(Club, on_delete=models.PROTECT, null=True, blank=True, related_name='eventos_club')
     est_even = models.CharField(max_length=255, choices=[('PENDIENTE_DAE', 'PENDIENTE_DAE'), ('APROBADO', 'APROBADO'), ('RECHAZADO', 'RECHAZADO')], default='PENDIENTE_DAE')
     asis_even = models.ManyToManyField(Usuario, blank=True, related_name='eventos_asistidos')
+
+    # Recibe metadatos del evento; exige coherencia entre la representación personal o del club y su vínculo persistente.
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(orga_even='PERSONAL', club_even__isnull=True) | models.Q(orga_even='CLUB', club_even__isnull=False), name='evento_organizador_coherente')]
 
 # Representa PublicacionForo; recibe sus campos y relaciones y produce registros persistentes.
 class PublicacionForo(models.Model):
@@ -102,3 +121,4 @@ class MensajeDirecto(models.Model):
     cont_mens = models.TextField()
     leid_mens = models.BooleanField(default=False)
     fech_mens = models.DateTimeField(auto_now_add=True)
+    aval_mens = models.OneToOneField(AvalClub, on_delete=models.SET_NULL, null=True, blank=True, related_name='mensaje_dm')

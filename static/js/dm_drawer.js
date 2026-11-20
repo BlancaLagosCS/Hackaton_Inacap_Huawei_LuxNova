@@ -1,6 +1,6 @@
 const dmConfig = document.getElementById('comunidad-tools');
 const dmDrawer = document.getElementById('dmDrawer');
-const dmEstado = { usuario: null, ocupado: false, enviando: false };
+const dmEstado = { usuario: null, ocupado: false, enviando: false, avalesEnviando: new Set() };
 let dmFocoAnterior = null;
 
 // Recibe ID opcional de persona; abre el drawer sin depender de Bootstrap y carga sus conversaciones o el destinatario indicado.
@@ -65,7 +65,7 @@ function dmURL(id, accion = '') { return dmConfig.dataset.dmHilo.replace('/0/', 
 async function dmPOST(url, campos = {}) {
   const datos = new FormData();
   for (const [clave, valor] of Object.entries(campos)) datos.append(clave, valor);
-  return lnJSON(url, { method: 'POST', headers: { 'X-CSRFToken': dmConfig.querySelector('[name=csrfmiddlewaretoken]').value }, body: datos });
+  return lnJSON(url, { method: 'POST', headers: { 'Accept': 'application/json', 'X-CSRFToken': dmConfig.querySelector('[name=csrfmiddlewaretoken]').value }, body: datos });
 }
 
 // Recibe fecha ISO opcional y devuelve una hora relativa legible, sin modificar el DOM.
@@ -86,7 +86,42 @@ function dmBurbuja(mensaje, ultimoVisto) {
   pie.textContent = new Date(mensaje.fecha).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
   if (mensaje.id === ultimoVisto) pie.textContent += ' · Visto';
   caja.append(burbuja, pie);
+  if (mensaje.aval) {
+    const estado = document.createElement('p');
+    estado.className = 'small mt-2 mb-1';
+    estado.textContent = `Aval para ${mensaje.aval.club}: ${mensaje.aval.estado.toLowerCase()}`;
+    burbuja.append(estado);
+    if (mensaje.aval.pendiente) {
+      const acciones = document.createElement('div');
+      acciones.className = 'd-flex flex-wrap gap-2 mt-2';
+      acciones.append(dmBotonAval(mensaje.aval, 'ACEPTADO', 'Aceptar aval'), dmBotonAval(mensaje.aval, 'RECHAZADO', 'Rechazar aval'));
+      burbuja.append(acciones);
+    }
+  }
   return caja;
+}
+
+// Recibe aval autorizado, decisión y etiqueta; devuelve un botón seguro que responde por POST con CSRF y evita doble envío.
+function dmBotonAval(aval, decision, etiqueta) {
+  const boton = document.createElement('button');
+  boton.type = 'button';
+  boton.className = 'btn btn-sm ' + (decision === 'ACEPTADO' ? 'btn-primary' : 'btn-outline-dark');
+  boton.textContent = etiqueta;
+  boton.disabled = dmEstado.avalesEnviando.has(aval.id);
+  // Recibe clic del destinatario; guarda su respuesta, actualiza hilo/contador y comunica errores sin enviar mensajes humanos.
+  async function responderAval() {
+    if (dmEstado.avalesEnviando.has(aval.id)) return;
+    dmEstado.avalesEnviando.add(aval.id);
+    boton.disabled = true;
+    try {
+      await dmPOST(aval.url, { decision });
+      await dmCargarHilo();
+      await dmCargarConversaciones();
+    } catch (error) { document.getElementById('dm-estado').textContent = error.message; }
+    finally { dmEstado.avalesEnviando.delete(aval.id); boton.disabled = false; }
+  }
+  boton.addEventListener('click', responderAval);
+  return boton;
 }
 
 // Recibe un perfil público; selecciona ese hilo, configura el bloqueo oficial y devuelve una promesa de carga de mensajes.

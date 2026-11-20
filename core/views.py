@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Subquery, Value, When
 from django.db.models import Prefetch
@@ -12,8 +13,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django.views.decorators.cache import never_cache
 
 from .forms import ComentarioForoForm, ConfiguracionCuentaForm, CrearCuentaInstitucionalForm, PostularClubForm, PublicacionForoForm, RegistroUsuarioForm, SolicitarEventoForm
-from .models import AvalClub, Club, ComentarioForo, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
-from .services import notificar_iniciativa
+from .models import AvalClub, Club, ComentarioForo, Evento, MembresiaClub, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
+from .services import notificar_iniciativa, notificar_solicitud_aval, resolver_aval
 from .utils import enviar_notificacion_sistema
 from .participacion import dashboard_participacion, preparar_estadisticas
 
@@ -94,7 +95,7 @@ def ahora_mismo(request):
 
 
 # Recibe la petición y formularios opcionales; devuelve el contexto del muro estrictamente limitado a la sede actual.
-def contexto_foro(request, formulario=None, comentario=None, publicacion_error=None):
+def contexto_foro(request, comentario=None, publicacion_error=None):
     publicaciones = PublicacionForo.objects.none()
     etiqueta = request.GET.get('etiqueta', '')
     if etiqueta not in ('AHORA_MISMO', 'NOTICIA', 'INICIATIVA'):
@@ -108,18 +109,27 @@ def contexto_foro(request, formulario=None, comentario=None, publicacion_error=N
         busqueda = request.GET.get('q', '').strip()[:200]
         if busqueda:
             publicaciones = publicaciones.filter(Q(tit_publ__icontains=busqueda) | Q(cont_publ__icontains=busqueda))
-    return {'publicaciones': publicaciones, 'form': formulario if formulario is not None else PublicacionForoForm(),
+    return {'publicaciones': publicaciones,
             'comentario_form': comentario, 'publicacion_error': publicacion_error, 'etiqueta': etiqueta}
 
 
-# Recibe GET o POST autenticado; muestra el muro por sede o guarda publicación y avisos de iniciativa en una transacción.
+# Recibe GET o POST heredado; muestra el muro compacto o deriva el envío antiguo al formulario dedicado.
 @login_required
 @require_http_methods(['GET', 'POST'])
 def foro_ahora_mismo(request):
+    if request.method == 'POST':
+        return crear_publicacion(request)
+    return render(request, 'foro.html', contexto_foro(request))
+
+
+# Recibe GET/POST autenticado; muestra un formulario dedicado o publica y notifica una iniciativa de su sede atómicamente.
+@login_required
+@require_http_methods(['GET', 'POST'])
+def crear_publicacion(request):
+    if not request.user.sede_usu_id:
+        return HttpResponseForbidden('Necesitas una sede asignada para publicar.')
     form = PublicacionForoForm(request.POST if request.method == 'POST' else None, request.FILES or None)
     if request.method == 'POST':
-        if not request.user.sede_usu_id:
-            return HttpResponseForbidden('Necesitas una sede asignada para publicar.')
         if form.is_valid():
             with transaction.atomic():
                 publicacion = form.save(commit=False)
@@ -132,7 +142,7 @@ def foro_ahora_mismo(request):
             else:
                 messages.success(request, 'Tu publicación ya está en el muro de tu sede.')
             return redirect('core:foro')
-    return render(request, 'foro.html', contexto_foro(request, formulario=form))
+    return render(request, 'crear_publicacion.html', {'form': form})
 
 
 # Recibe POST y el ID de una publicación; valida su sede y guarda un comentario propio o devuelve errores de formulario.
@@ -153,71 +163,35 @@ def comentar_publicacion(request, publ_id):
     return render(request, 'foro.html', contexto_foro(request, comentario=form, publicacion_error=publicacion.pk), status=400)
 
 
-# Recibe GET autenticado; marca avisos visibles como leídos y devuelve notificaciones propias y el buzón autorizado por sede.
+# Recibe GET de líder/DAE/ADMIN; devuelve solo iniciativas dirigidas a su cuenta y sede, marcándolas como leídas.
 @login_required
 @require_http_methods(['GET'])
 def buzon_inbox(request):
-    recibidos = MensajeInbox.objects.filter(dest_inbo=request.user)
-    pendientes = AvalClub.objects.filter(estu_aval=request.user, est_aval='PENDIENTE', club_aval_id=OuterRef('club_inbo_id'))
-    solicitudes = recibidos.filter(tipo_inbo='SOLICITUD_AVAL').annotate(pendiente=Exists(pendientes))
-    recibidos.filter(tipo_inbo='SISTEMA').update(leid_inbo=True)
-    solicitudes.filter(pendiente=False).update(leid_inbo=True)
-    solicitudes.filter(pendiente=True).update(leid_inbo=False)
-    puede_ver_iniciativas = request.user.rol_usu in ROLES_GESTION
-    iniciativas = recibidos.none()
-    if puede_ver_iniciativas and request.user.sede_usu_id:
-        iniciativas = recibidos.filter(tipo_inbo='INICIATIVA_BUZON', publ_inbo__sede_publ_id=request.user.sede_usu_id)
-        iniciativas.update(leid_inbo=True)
-    avales = {a.club_aval_id: a for a in AvalClub.objects.filter(estu_aval=request.user).order_by('-pk')}
-    notificaciones = list(recibidos.filter(tipo_inbo__in=['SISTEMA', 'SOLICITUD_AVAL']).select_related('club_inbo').order_by('-fech_inbo', '-pk'))
-    for mensaje in notificaciones:
-        mensaje.aval = avales.get(mensaje.club_inbo_id) if mensaje.tipo_inbo == 'SOLICITUD_AVAL' else None
-    return render(request, 'inbox.html', {'notificaciones': notificaciones,
-        'iniciativas': iniciativas.select_related('publ_inbo__aut_publ').order_by('-fech_inbo', '-pk'),
-        'puede_ver_iniciativas': puede_ver_iniciativas})
+    if request.user.rol_usu not in ROLES_BUZON:
+        return HttpResponseForbidden('El buzón de sugerencias es exclusivo de líderes y equipo DAE. Tus notificaciones están en Mensajes.')
+    iniciativas = MensajeInbox.objects.filter(dest_inbo=request.user, tipo_inbo='INICIATIVA_BUZON', publ_inbo__sede_publ_id=request.user.sede_usu_id) if request.user.sede_usu_id else MensajeInbox.objects.none()
+    iniciativas.update(leid_inbo=True)
+    return render(request, 'inbox.html', {'iniciativas': iniciativas.select_related('publ_inbo__aut_publ').order_by('-fech_inbo', '-pk'), 'puede_ver_iniciativas': True})
 
 
-# Recibe POST del dueño del aval y su decisión; registra una respuesta única, escala tras cuatro pares y devuelve redirección.
+# Recibe POST del destinatario; resuelve el aval desde DM con CSRF y devuelve JSON o la entrada a mensajes.
 @login_required
 @require_POST
 def responder_aval(request, aval_id):
-    decision = request.POST.get('decision')
-    if decision not in ('ACEPTADO', 'RECHAZADO'):
-        return JsonResponse({'error': 'Selecciona aceptar o rechazar.'}, status=400)
-    with transaction.atomic():
-        referencia = get_object_or_404(AvalClub, pk=aval_id, estu_aval=request.user)
-        club = get_object_or_404(Club.objects.select_for_update(), pk=referencia.club_aval_id)
-        aval = AvalClub.objects.select_for_update().get(pk=referencia.pk)
-        if not request.user.sede_usu_id or request.user.sede_usu_id != club.sede_club_id or club.lid_club_id == request.user.pk:
-            return HttpResponseForbidden('Solo los compañeros de la sede pueden responder este aval.')
-        if aval.est_aval != 'PENDIENTE' or club.est_club != 'PENDIENTE_AVALES':
-            messages.info(request, 'Esta solicitud ya fue respondida o cerrada.')
-            return redirect('core:inbox')
-        aval.est_aval = decision
-        aval.fech_aval = timezone.now()
-        aval.save(update_fields=['est_aval', 'fech_aval'])
-        MensajeInbox.objects.filter(dest_inbo=request.user, club_inbo=club, tipo_inbo='SOLICITUD_AVAL').update(leid_inbo=True)
-        if decision == 'RECHAZADO':
-            MensajeInbox.objects.create(dest_inbo=club.lid_club, tipo_inbo='SISTEMA', club_inbo=club,
-                asun_inbo='Aval de club rechazado', cuer_inbo=f'{request.user.nom_usu or request.user.username} rechazó el aval para {club.nom_club}.')
-        else:
-            avales = list(club.avales.select_related('estu_aval'))
-            if (len(avales) == 4 and len({a.estu_aval_id for a in avales}) == 4
-                    and all(a.est_aval == 'ACEPTADO' and a.estu_aval.sede_usu_id == club.sede_club_id and a.estu_aval_id != club.lid_club_id for a in avales)):
-                club.est_club = 'PENDIENTE_DAE'
-                club.save(update_fields=['est_club'])
-                destinatarios = Usuario.objects.filter(Q(rol_usu='DAE', sede_usu_id=club.sede_club_id) | Q(pk=club.lid_club_id)).distinct()
-                MensajeInbox.objects.bulk_create([MensajeInbox(dest_inbo=u, tipo_inbo='SISTEMA', club_inbo=club,
-                    asun_inbo='Club listo para revisión DAE', cuer_inbo=f'{club.nom_club} completó sus 4 avales y está listo para revisión de la DAE.') for u in destinatarios])
-                for destinatario in destinatarios:
-                    enviar_notificacion_sistema(destinatario, f'{club.nom_club} completó sus 4 avales y está listo para revisión de la DAE.')
-        enviar_notificacion_sistema(request.user, f'Tu aval para {club.nom_club} quedó {decision.lower()}.')
-    messages.success(request, 'Tu respuesta al aval fue registrada.')
-    return redirect('core:inbox')
+    get_object_or_404(AvalClub, pk=aval_id, estu_aval=request.user)
+    try:
+        aval, cambio = resolver_aval(aval_id, request.user, request.POST.get('decision'))
+    except ValidationError as error:
+        return JsonResponse({'error': error.messages[0]}, status=400)
+    if 'application/json' in request.headers.get('Accept', ''):
+        return JsonResponse({'estado': aval.est_aval, 'actualizado': cambio})
+    messages.info(request, 'Tu respuesta al aval fue registrada.' if cambio else 'Esta solicitud ya fue respondida o cerrada.')
+    return redirect(reverse('core:mensajes') + '?usuario=' + str(Usuario.objects.get(username='sistema').pk))
 
 
 ROLES_GESTION = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'DAE', 'ADMIN')
 ROLES_EVENTO = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'ADMIN')
+ROLES_BUZON = ('LIDER_ESTUDIANTIL', 'DAE', 'ADMIN')
 
 
 # Recibe visitante y dueño de un teléfono; devuelve si el visitante es propietario o tiene un rol autorizado.
@@ -314,12 +288,12 @@ def conflicto_espacio(evento):
         fech_even__lt=evento.ffin_even).filter(Q(ffin_even__gt=evento.fech_even) | Q(ffin_even__isnull=True)).exclude(pk=evento.pk).exists()
 
 
-# Recibe GET/POST estudiantil; guarda club, cuatro avales y sus avisos atómicamente y devuelve perfil con confirmación o errores.
+# Recibe GET/POST de estudiante o líder; guarda club y cuatro solicitudes DM atómicamente y devuelve su página con estados/errores.
 @login_required
 @require_http_methods(['GET', 'POST'])
 def postular_club(request):
-    if request.user.rol_usu != 'ESTUDIANTE' or not request.user.sede_usu_id:
-        return HttpResponseForbidden('Solo estudiantes con sede pueden postular clubes.')
+    if request.user.rol_usu not in ('ESTUDIANTE', 'LIDER_ESTUDIANTIL') or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Solo estudiantes y líderes con sede pueden postular clubes.')
     form = PostularClubForm(request.POST if request.method == 'POST' else None, user=request.user)
     if request.method == 'POST' and form.is_valid():
         with transaction.atomic():
@@ -329,10 +303,8 @@ def postular_club(request):
             club.est_club = 'PENDIENTE_AVALES'
             club.save()
             for estudiante in form.cleaned_data['avales']:
-                AvalClub.objects.create(club_aval=club, estu_aval=estudiante)
-                MensajeInbox.objects.create(dest_inbo=estudiante, remi_inbo=None, tipo_inbo='SOLICITUD_AVAL', club_inbo=club,
-                    asun_inbo=f'Solicitud de Aval para Club: {club.nom_club}'[:255],
-                    cuer_inbo=f"{request.user.nom_usu} te invita a avalar la creación del club '{club.nom_club}' ({club.get_cat_club_display()}). Responde en tu Buzón de sugerencias.")
+                aval = AvalClub.objects.create(club_aval=club, estu_aval=estudiante)
+                notificar_solicitud_aval(aval)
         messages.success(request, 'Postulación enviada: tus cuatro compañeros recibieron la solicitud de aval.')
         return redirect('core:postular_club')
     postulaciones = Club.objects.filter(lid_club=request.user).annotate(aceptados=Count('avales', filter=Q(avales__est_aval='ACEPTADO'))).order_by('-fech_club')
@@ -345,7 +317,13 @@ def postular_club(request):
 def solicitar_evento(request):
     if request.user.rol_usu not in ROLES_EVENTO or not request.user.sede_usu_id:
         return HttpResponseForbidden('Necesitas un rol de gestión y una sede para solicitar eventos.')
-    form = SolicitarEventoForm(request.POST if request.method == 'POST' else None, request.FILES or None)
+    form = SolicitarEventoForm(request.POST if request.method == 'POST' else None, request.FILES or None, user=request.user)
+    if request.method == 'GET' and request.GET.get('club'):
+        club_id = request.GET.get('club')
+        if not club_id.isdigit():
+            return JsonResponse({'error': 'Club inválido.'}, status=400)
+        elegido = get_object_or_404(form.fields['club_even'].queryset, pk=int(club_id))
+        form.initial.update(orga_even='CLUB', club_even=elegido.pk)
     if request.method == 'POST' and form.is_valid():
         with transaction.atomic():
             Sede.objects.select_for_update().get(pk=request.user.sede_usu_id)
@@ -391,6 +369,8 @@ def aprobar_rechazar_club(request, club_id, accion):
         if accion == 'aprobar' and lider.rol_usu == 'ESTUDIANTE':
             lider.rol_usu = 'LIDER_ESTUDIANTIL'
             lider.save(update_fields=['rol_usu'])
+        if accion == 'aprobar':
+            MembresiaClub.objects.update_or_create(club_memb=club, usu_memb=lider, defaults={'acti_memb': True, 'baja_memb': None})
         cuerpo = f'Tu club {club.nom_club} fue {club.est_club.lower()}.'
         if accion == 'aprobar':
             cuerpo += ' Ya tienes habilitada la reserva de espacios en tu perfil.'
@@ -535,6 +515,65 @@ def mensajes(request):
     return render(request, 'mensajes.html', {'dm_destino_id': destino})
 
 
+# Recibe GET autenticado; muestra clubes aprobados de su sede con contador activo y estado de membresía propia.
+@login_required
+@require_http_methods(['GET'])
+def clubes(request):
+    registros = Club.objects.filter(sede_club_id=request.user.sede_usu_id, est_club='APROBADO').select_related('lid_club').annotate(total_miembros=Count('membresias', filter=Q(membresias__acti_memb=True))) if request.user.sede_usu_id else Club.objects.none()
+    return render(request, 'clubes.html', {'clubes': registros.order_by('nom_club'), 'membresias_ids': set(request.user.membresias_club.filter(acti_memb=True).values_list('club_memb_id', flat=True))})
+
+
+# Recibe GET y club aprobado de su sede; muestra descripción y eventos, y reserva la lista de miembros para el líder o DAE/ADMIN.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def detalle_club(request, club_id):
+    club = get_object_or_404(Club.objects.select_related('lid_club', 'sede_club'), pk=club_id, est_club='APROBADO', sede_club_id=request.user.sede_usu_id)
+    es_lider = club.lid_club_id == request.user.pk
+    miembros = club.membresias.filter(acti_memb=True).select_related('usu_memb').order_by('usu_memb__nom_usu')
+    puede_ver = es_lider or request.user.rol_usu in ('DAE', 'ADMIN')
+    return render(request, 'detalle_club.html', {'club': club, 'es_lider_club': es_lider, 'es_miembro': miembros.filter(usu_memb=request.user).exists(),
+        'puede_unirse': request.user.rol_usu not in ('DAE', 'ADMIN'), 'total_miembros': miembros.count(), 'miembros': miembros if puede_ver else [],
+        'puede_ver_miembros': puede_ver, 'eventos': club.eventos_club.filter(est_even='APROBADO').select_related('sede_even', 'club_even').order_by('-fech_even'), 'ahora': timezone.now()})
+
+
+# Recibe POST unirse/salir; modifica solo la membresía propia de un club local aprobado, preservando su baja e historial.
+@login_required
+@require_POST
+def membresia_club(request, club_id):
+    if request.user.rol_usu in ('DAE', 'ADMIN'):
+        return HttpResponseForbidden('Tu rol gestiona clubes y no se inscribe como miembro.')
+    accion = request.POST.get('accion')
+    if accion not in ('unirse', 'salir'):
+        return JsonResponse({'error': 'Selecciona unirse o salir.'}, status=400)
+    with transaction.atomic():
+        club = get_object_or_404(Club.objects.select_for_update(), pk=club_id, sede_club_id=request.user.sede_usu_id, est_club='APROBADO')
+        if accion == 'salir' and club.lid_club_id == request.user.pk:
+            return HttpResponseForbidden('El líder responsable conserva su membresía mientras lidera el club.')
+        if accion == 'unirse':
+            MembresiaClub.objects.update_or_create(club_memb=club, usu_memb=request.user, defaults={'acti_memb': True, 'baja_memb': None})
+        else:
+            MembresiaClub.objects.filter(club_memb=club, usu_memb=request.user, acti_memb=True).update(acti_memb=False, baja_memb=timezone.now())
+    messages.success(request, 'Ya eres miembro del club.' if accion == 'unirse' else 'Saliste del club. Conservas su historial de eventos anteriores a tu salida.')
+    return redirect('core:detalle_club', club_id=club.pk)
+
+
+# Recibe GET propio; muestra membresías activas y pasadas, más eventos aprobados de clubes con historial conservado tras salir.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def mis_clubes(request):
+    membresias = request.user.membresias_club.filter(club_memb__est_club='APROBADO').select_related('club_memb__lid_club', 'club_memb__sede_club')
+    filtro = Q(pk__in=[])
+    for membresia in membresias:
+        condicion = Q(club_even_id=membresia.club_memb_id)
+        if not membresia.acti_memb:
+            condicion &= Q(fech_even__lte=membresia.baja_memb) if membresia.baja_memb else Q(pk__in=[])
+        filtro |= condicion
+    eventos = Evento.objects.filter(filtro, est_even='APROBADO').select_related('club_even', 'sede_even', 'crea_even').order_by('-fech_even')
+    return render(request, 'mis_clubes.html', {'membresias': membresias, 'eventos': eventos, 'ahora': timezone.now()})
+
+
 # Recibe un usuario y devuelve solo datos de perfil públicos para buscadores y conversaciones, sin RUT, correo ni teléfono.
 def usuario_json(usuario):
     return {'id': usuario.pk, 'username': usuario.username, 'nom_usu': usuario.nom_usu,
@@ -579,8 +618,17 @@ def dm_conversaciones(request):
 @require_http_methods(['GET'])
 def dm_hilo(request, usuario_id):
     interlocutor = get_object_or_404(Usuario.objects.select_related('sede_usu').exclude(pk=request.user.pk), pk=usuario_id)
-    mensajes = MensajeDirecto.objects.filter(Q(emi_mens=request.user, rec_mens=interlocutor) | Q(emi_mens=interlocutor, rec_mens=request.user)).order_by('-pk')[:100]
-    return JsonResponse({'usuario': usuario_json(interlocutor), 'mensajes': [{'id': m.pk, 'propio': m.emi_mens_id == request.user.pk, 'contenido': m.cont_mens, 'leido': m.leid_mens, 'fecha': m.fech_mens.isoformat()} for m in reversed(list(mensajes))]})
+    mensajes = MensajeDirecto.objects.filter(Q(emi_mens=request.user, rec_mens=interlocutor) | Q(emi_mens=interlocutor, rec_mens=request.user)).select_related('aval_mens__club_aval', 'emi_mens').order_by('-pk')[:100]
+    return JsonResponse({'usuario': usuario_json(interlocutor), 'mensajes': [mensaje_dm_json(m, request.user) for m in reversed(list(mensajes))]})
+
+
+# Recibe mensaje autorizado del hilo y su lector; devuelve texto seguro y acciones de aval solo al destinatario del canal oficial.
+def mensaje_dm_json(mensaje, lector):
+    datos = {'id': mensaje.pk, 'propio': mensaje.emi_mens_id == lector.pk, 'contenido': mensaje.cont_mens, 'leido': mensaje.leid_mens, 'fecha': mensaje.fech_mens.isoformat()}
+    aval = mensaje.aval_mens
+    if aval and mensaje.emi_mens.username == 'sistema' and mensaje.rec_mens_id == lector.pk and aval.estu_aval_id == lector.pk:
+        datos['aval'] = {'id': aval.pk, 'club': aval.club_aval.nom_club, 'estado': aval.est_aval, 'pendiente': aval.est_aval == 'PENDIENTE' and aval.club_aval.est_club == 'PENDIENTE_AVALES', 'url': reverse('core:responder_aval', args=[aval.pk])}
+    return datos
 
 
 # Recibe usuario actual, interlocutor y corte opcional; marca únicamente mensajes recibidos de ese hilo y devuelve cantidad actualizada.

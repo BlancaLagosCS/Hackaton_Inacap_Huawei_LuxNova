@@ -31,7 +31,7 @@ class GaleriaV7Tests(TestCase):
             return EditarPerfilForm({'bio_usu': 'Biografía ficticia'}, {'foto_usu': archivo})
         if tipo == 'foro':
             return PublicacionForoForm({'etiq_publ': 'AHORA_MISMO', 'cont_publ': 'Demo'}, {'img_publ': archivo})
-        return SolicitarEventoForm({'tit_even': 'Evento ficticio', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=5)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(timezone.now() + timedelta(days=5, hours=2)).strftime('%Y-%m-%dT%H:%M')}, {'ban_even': archivo})
+        return SolicitarEventoForm({'orga_even': 'PERSONAL', 'tit_even': 'Evento ficticio', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=5)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(timezone.now() + timedelta(days=5, hours=2)).strftime('%Y-%m-%dT%H:%M')}, {'ban_even': archivo})
 
     # Recibe archivos de tamaño exacto y excedido; comprueba límites 2/3 MB y aceptación de PNG/JPEG.
     def test_limites_imagen(self):

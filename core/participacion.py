@@ -20,8 +20,7 @@ def preparar_estadisticas(request, eventos):
         if evento.sede_even_id == request.user.sede_usu_id:
             inscritos = list(evento.asis_even.all())
             carreras = Counter(u.carr_usu or 'Sin carrera' for u in inscritos)
-            cohortes = Counter(str(u.anio_usu) if u.anio_usu else 'Sin año' for u in inscritos)
-            evento.estadisticas = {'carreras': barras(sorted(carreras.items())), 'temporal': barras(sorted(cohortes.items())), 'inscritos': inscritos}
+            evento.estadisticas = {'carreras': barras(sorted(carreras.items())), 'inscritos': inscritos}
     return eventos
 
 

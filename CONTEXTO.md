@@ -75,15 +75,16 @@ Hackaton_Inacap_Huawei_LuxNova/
    - Antes de hacer commit: verificar venv\Scripts\python.exe manage.py check y migrate sin errores, y actualizar CONTEXTO_VERSIONES.md.
    - Si se instala un paquete: actualizar requirements.txt y avisar al equipo.
 1. Sede: nom_sede (único), dir_sede.
-2. Usuario (AUTH_USER_MODEL): Hereda de AbstractUser + nom_usu, rut_usu (único), corr_usu (único), tel_usu (privado), sede_usu (FK Sede), carr_usu (carrera), anio_usu (año ingreso), rol_usu (ESTUDIANTE, DELEGADO, LIDER_ESTUDIANTIL, JEFATURA, DAE, ADMIN), foto_usu (ImageField), bio_usu.
-3. Club: nom_club, cat_club (VIDA_ESTUDIANTIL, DESARROLLO_ACADEMICO, OTRO), desc_club, sede_club (FK Sede), lid_club (FK Usuario), est_club (PENDIENTE_AVALES, PENDIENTE_DAE, APROBADO, RECHAZADO), fech_club.
+2. Usuario (AUTH_USER_MODEL): Hereda de AbstractUser + nom_usu, rut_usu (único), corr_usu (único), tel_usu (privado), sede_usu (FK Sede), carr_usu (carrera), rol_usu (ESTUDIANTE, DELEGADO, LIDER_ESTUDIANTIL, JEFATURA, DAE, ADMIN), foto_usu (ImageField), bio_usu. Año de ingreso eliminado en la ampliación v11.
+3. Club: nom_club, cat_club (VIDA_ESTUDIANTIL, DESARROLLO_ACADEMICO, OTRO), desc_club, sede_club (FK Sede), lid_club (FK Usuario), est_club (PENDIENTE_AVALES, PENDIENTE_DAE, APROBADO, RECHAZADO), fech_club, miem_club (M2M Usuario mediante MembresiaClub).
 4. AvalClub: club_aval (FK Club), estu_aval (FK Usuario), est_aval (PENDIENTE, ACEPTADO, RECHAZADO), fech_aval.
-5. Evento: tit_even, desc_even, ban_even (ImageField), cat_even (TODO_PUBLICO, CARRERAS_AFINES), alc_even (SEDE, INTERSEDE), sede_even (FK Sede), esp_even (espacio solicitado), fech_even (inicio), ffin_even (término nullable para históricos, obligatorio en formulario/demo), crea_even (FK Usuario), est_even (PENDIENTE_DAE, APROBADO, RECHAZADO), asis_even (M2M Usuario).
+5. Evento: tit_even, desc_even, ban_even (ImageField), cat_even (TODO_PUBLICO, CARRERAS_AFINES), alc_even (SEDE, INTERSEDE), sede_even (FK Sede), esp_even (espacio solicitado), fech_even (inicio), ffin_even (término nullable para históricos, obligatorio en formulario/demo), crea_even (FK Usuario), orga_even (PERSONAL/CLUB), club_even (FK Club nullable, PROTECT), est_even (PENDIENTE_DAE, APROBADO, RECHAZADO), asis_even (M2M Usuario).
 6. PublicacionForo: aut_publ (FK Usuario), sede_publ (FK Sede), etiq_publ (AHORA_MISMO, NOTICIA, INICIATIVA), tit_publ, cont_publ, img_publ (ImageField), fech_publ.
 7. ComentarioForo: publ_come (FK PublicacionForo), aut_come (FK Usuario), cont_come, fech_come.
 8. MensajeInbox: dest_inbo (FK Usuario), remi_inbo (FK Usuario nullable; None = Sistema Oficial INACAP), tipo_inbo (SISTEMA, SOLICITUD_AVAL, INICIATIVA_BUZON), asun_inbo, cuer_inbo, club_inbo (FK Club nullable), publ_inbo (FK PublicacionForo nullable), leid_inbo, fech_inbo.
 9. RegistroAuditoria: dae_audi (FK Usuario), acc_audi, det_audi, fech_audi.
-10. MensajeDirecto: emi_mens (FK Usuario, dms_enviados), rec_mens (FK Usuario, dms_recibidos), cont_mens, leid_mens (default False), fech_mens (auto_now_add). Conversaciones privadas por pareja de participantes.
+10. MensajeDirecto: emi_mens (FK Usuario, dms_enviados), rec_mens (FK Usuario, dms_recibidos), cont_mens, leid_mens (default False), fech_mens (auto_now_add), aval_mens (OneToOne AvalClub nullable). Conversaciones privadas por pareja de participantes.
+11. MembresiaClub: club_memb (FK Club), usu_memb (FK Usuario), acti_memb, fech_memb, baja_memb (nullable). Relación única club/usuario; conserva bajas para el historial de eventos.
 Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo este orden. No implementar funcionalidades de versiones futuras antes de cerrar, probar (manage.py check) y documentar la versión actual en CONTEXTO_VERSIONES.md.
 - v1 — Base de Datos Relacional y Arquitectura MVT [COMPLETADA]:
   - Alcance: Creación de app única core/, configuración PostgreSQL (hackaton_luxnova), migración de las 9 tablas relacionales con nomenclatura [campo]_[tabla], core/admin.py y .gitignore.
@@ -110,16 +111,16 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
 
 `core/models.py` define CARRERAS_CHOICES y conserva carr_usu como CharField(max_length=255). Valores y etiquetas exactos:
 
-- Ing. Informática (4 años)
-- Ing. Diseño (4 años)
-- Ing. Mecánica (4 años)
+- Ing. Informática
+- Ing. Diseño
+- Ing. Mecánica
 - Técnico Analista Programador
 - Técnico Enfermería
 - Técnico Mecánica
 - Técnico Diseño
 - Técnico Gastronomía
 
-El registro usa un selector cerrado. Las ingenierías indican 4 años; los técnicos mantienen las etiquetas exactas solicitadas sin inventar duraciones. La migración 0002 no elimina ni transforma valores históricos; la carga demo sí actualiza sus siete cuentas a una carrera válida.
+El registro usa un selector cerrado. Desde la ampliación v11 las ingenierías no muestran duración; 0005 normaliza las tres carreras antiguas en todos los usuarios y elimina anio_usu. La migración 0002 se conserva como memoria histórica. La carga demo respeta las nuevas etiquetas y no vuelve a escribir el año.
 
 `validar_rut_chileno` limpia puntos/espacios, acepta DV numérico o K, verifica Módulo 11 y devuelve cuerpo-DV (sin ceros iniciales, K mayúscula). El formulario exige RUT válido y comprueba unicidad de rut_usu y corr_usu sin distinguir mayúsculas; el correo se guarda en minúsculas. La vista repite consultas de duplicados y captura IntegrityError dentro de una transacción para mostrar un error Bootstrap si hay una inserción concurrente. Se conservan las restricciones unique existentes en PostgreSQL. Datos históricos ajenos a la demo no se reescriben automáticamente.
 
@@ -210,3 +211,21 @@ Los accesos **Crear evento** y **Eventos que estoy organizando** comparten el mi
 Mensajería: botón fijo rojo **Mensajes** con texto y SVG incluido en HTML, disponible en todas las páginas autenticadas, más acceso Mensajes en navbar y herramientas del perfil. Ya no depende de una fuente de iconos ni del JavaScript de Bootstrap para abrir/cerrar el drawer: `dm_drawer.js` maneja apertura, fondo, cierre, Escape, foco y Tab en Vanilla JS. Buscar por nombre/@nickname abre una conversación; el encabezado muestra **Ver perfil**. Desde cualquier perfil ajeno, **Enviar mensaje** abre directamente su hilo. `/mensajes/?usuario=<id>` es una entrada autenticada con autoapertura; GET solo renderiza, sin enviar ni marcar lecturas. Se conservan POST/CSRF, polling, cuenta oficial sin respuestas y las APIs v9. CSS/scripts propios llevan `?v=perfil11-final` para renovar caché. Se comprobó que Cloudflare entregaba una copia anterior del JS con la primera clave de versión; la clave final devuelve el mismo texto que los archivos locales.
 
 Validación v11: 63 pruebas aprobadas, check y migraciones sin pendientes. Navegador Edge en 1366px, 1024px y 390px: perfil, búsqueda est2, apertura por botón, hilo móvil, Ver perfil y Enviar mensaje; sin enviar mensajes de prueba a personas. El servidor local permanece activo. El usuario indicó https://luxnova.cl: ese nombre sin www no devuelve dirección A/AAAA y el navegador muestra DNS_PROBE_FINISHED_NXDOMAIN. **https://www.luxnova.cl sí responde HTTP 200 y sirve los cambios actuales**, comprobados con sesión demo en el perfil y apertura real del drawer; CSS/JS públicos coinciden en texto con los locales al usar la versión final. Se conserva el túnel cloudflared existente sin cambiar su configuración ni DNS. El funcionamiento público a través del túnel es independiente del push Git, que sigue bloqueado por la revisión previa y no se reintentó.
+
+## 13. Ampliación v11 — Foro directo, comunidad de clubes y avales por DM (vigente)
+
+Esta ampliación sustituye las reglas antiguas de Inbox, año académico y postulación limitada al rol ESTUDIANTE. `/foro/` muestra primero Todo, #AhoraMismo, #Noticias y #Iniciativa; “La vida de tu sede” es una barra pequeña con **Crear publicación**. El compositor vive en `/foro/publicar/`, con foto/vista previa, validaciones y notificaciones de iniciativa existentes. Se conserva POST a la antigua ruta del foro por compatibilidad, pero los errores se presentan en la pantalla dedicada.
+
+**Postular a líder** desde el perfil de ESTUDIANTE presenta una propuesta de club con cuatro avalistas activos de su sede. El rol solo cambia al aprobar DAE, después de cuatro avales. Un LIDER_ESTUDIANTIL puede crear más clubes usando el mismo flujo. Avalar no inscribe al club. Solicitudes nuevas crean exclusivamente un DM oficial enlazado por aval_mens, sin crear avisos de aval en MensajeInbox. Las solicitudes antiguas se enlazan/reutilizan durante 0005; registros Inbox anteriores se conservan como historial técnico y no se muestran en el buzón.
+
+El DM oficial ofrece acciones **Aceptar aval / Rechazar aval**, solo al destinatario. `/avales/<id>/responder/` exige POST/CSRF, propiedad, misma sede y club pendiente; la ruta `/inbox/aval/<id>/` queda como alias heredado. `services.resolver_aval` bloquea club/aval, conserva respuestas terminales y escala una sola vez tras cuatro válidos. DM avisa al solicitante y DAE local. El canal oficial sigue sin admitir texto humano. El **Buzón de sugerencias** contiene solo iniciativas dirigidas al receptor y su sede, y solo existe para LIDER_ESTUDIANTIL, DAE y ADMIN; ESTUDIANTE, DELEGADO y JEFATURA no ven el enlace y reciben 403 por URL directa. Los avisos del sistema se consultan en Mensajes.
+
+`/clubes/` descubre clubes aprobados locales; `/clubes/<id>/` permite unirse/salir por POST a `/clubes/<id>/membresia/`. DAE/ADMIN gestionan sin inscribirse. El líder se incorpora al aprobar el club y no puede abandonarlo mientras sea responsable. Solo él o DAE/ADMIN locales ven la lista de miembros con enlaces perfil/DM. MembresiaClub conserva una relación única por persona/club, activación, fecha y baja; unirse no implica preinscribirse a eventos. `/perfil/mis-clubes/` muestra clubes propios y **Eventos de mis clubes** aprobados, pasados y futuros; después de salir, conserva eventos anteriores a la baja y excluye próximos eventos de ese club. La reincorporación reactiva la misma relación.
+
+SolicitarEventoForm exige escoger orga_even: **a título personal según su rol** o **en nombre de un club estudiantil**. Si es CLUB, club_even es obligatorio y solo puede ser aprobado, de su sede y liderado por el organizador. Si es PERSONAL, club_even debe quedar vacío. El botón del club preselecciona ambos campos con `?club=<id>` validado. `eventos.js` muestra el selector según la elección y el servidor vuelve a validarlo. 0006 impone coherencia PERSONAL/null o CLUB/no-null en PostgreSQL. Tarjetas y panel DAE identifican al club y responsable. Los eventos antiguos se mantienen personales, sin atribuirlos a clubes por inferencia.
+
+**Datos académicos:** anio_usu se elimina físicamente mediante 0005, de formularios, perfiles, demo y gráficos; no se inventa una métrica temporal alternativa. Se mantiene participación por carrera. Las tres ingenierías usan nombres sin “(4 años)” tanto en choices como en registros existentes. No ejecutar cargar_datos_demo sobre esta sesión activa: restablece roles/contraseñas; solo se verificó su idempotencia en BD de pruebas.
+
+La solicitud real de club #2 quedó con sus cuatro avales aceptados por petición explícita del usuario y confirmación de identidad. Se aplicó el mismo servicio transaccional, dejando **PENDIENTE_DAE**, sin aprobar el club ni cambiar roles. En una comprobación posterior ya figuraba APROBADO, con resolución registrada desde la cuenta DAE durante la sesión; se conservó esa decisión sin revertirla. No modificar otras solicitudes al repetir comprobaciones. Los archivos multimedia que el usuario está subiendo se conservan fuera del commit de código.
+
+Calidad: 71 pruebas aprobadas, migraciones 0005/0006 aplicadas y check sin errores; se verifican formularios, representación/club autorizado, membresías/privacidad/historial, DM y normalización histórica. Navegador móvil 390px: filtros en una fila y primera publicación alrededor de 327px; compositor separado y botones de aval visibles en DM oficial sin responder solicitudes adicionales. Assets versionados con `v11-comunidad-<hash>` para invalidar la caché pública. El túnel existente y servidor local siguen activos; el bloqueo anterior de push no se elude.

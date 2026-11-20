@@ -12,7 +12,7 @@ def asegurar_usuario_sistema(using='default'):
     return usuario
 
 
-# Recibe destinatario y texto; crea un DM oficial sin permitir responder al canal y devuelve el registro creado.
-def enviar_notificacion_sistema(usuario_destino, texto_mensaje):
+# Recibe destinatario, texto y aval opcional; crea un DM oficial con acciones de aval permitidas y devuelve el registro.
+def enviar_notificacion_sistema(usuario_destino, texto_mensaje, aval=None):
     sistema = Usuario.objects.filter(username='sistema').first() or asegurar_usuario_sistema()
-    return MensajeDirecto.objects.create(emi_mens=sistema, rec_mens=usuario_destino, cont_mens=texto_mensaje)
+    return MensajeDirecto.objects.create(emi_mens=sistema, rec_mens=usuario_destino, cont_mens=texto_mensaje, aval_mens=aval)

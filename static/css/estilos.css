@@ -125,6 +125,13 @@ body a { color: #FFFFFF; }
 
 /* Perfil: dos secciones principales y herramientas agrupadas, sin formularios en la portada. */
 .perfil-cabecera { padding: 1.75rem; border: 0; border-radius: 20px; margin-bottom: 1.25rem; }
+.foro-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: .5rem; }
+.foro-cabecera .perfil-sobrelinea { font-size: .7rem; }
+.foro-cabecera .btn { padding: .6rem .9rem; }
+.foro-filtros, .foro-cabecera { max-width: 850px; margin-inline: auto; }
+.foro-filtros .btn { padding: .5rem .65rem; font-size: .8rem; line-height: 1.2; }
+.foro-publicaciones { max-width: 850px; margin-inline: auto; }
+@media (max-width: 600px) { .foro-cabecera { flex-wrap: wrap; gap: .6rem; } }
 .perfil-identidad { display: flex; gap: 1.25rem; align-items: center; }
 .perfil-identidad .avatar-perfil { flex-shrink: 0; width: 94px; height: 94px; }
 .perfil-datos { min-width: 0; }

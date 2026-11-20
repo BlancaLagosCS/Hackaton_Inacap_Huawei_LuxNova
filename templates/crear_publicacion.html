@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center"><section class="col-lg-8"><div class="card p-4 p-lg-5">
+<a href="{% url 'core:foro' %}" class="small mb-3">Volver al foro</a><h2 class="h4">Tu comunidad tiene algo que contar</h2><p class="text-secondary">Con #Iniciativa, tu propuesta y tus datos de contacto llegan de forma privada a los Líderes y DAE de tu sede.</p>
+<form method="post" enctype="multipart/form-data" action="{% url 'core:crear_publicacion' %}">{% csrf_token %}{% include 'partials/formulario.html' %}<img id="vista-previa-foro" class="foto-foro rounded mb-3" alt="Vista previa de la foto seleccionada" hidden><button class="btn btn-primary">Publicar en mi sede</button></form>
+</div></section></div>
+{% endblock %}

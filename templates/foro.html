@@ -1,17 +1,13 @@
 {% extends 'base.html' %}
-{% block title %}Ahora Mismo · INACAP Smart{% endblock %}
+{% block title %}Foro · INACAP Smart{% endblock %}
 {% block content %}
-<section class="hero mb-4"><span class="eyebrow">LA VIDA DE TU SEDE</span><h1 class="display-5 fw-bold mt-3">Ahora Mismo</h1><p class="lead mb-0">Comparte lo que pasa en {{ user.sede_usu.nom_sede|default:'tu comunidad' }}.</p></section>
-{% if user.sede_usu_id %}
-<div class="row g-4 justify-content-center"><div class="col-lg-8">
-<section class="card border-0 shadow-sm p-4 mb-4" aria-labelledby="crear-publicacion"><h2 id="crear-publicacion" class="h4">Tu comunidad tiene algo que contar</h2><p class="text-secondary">Con #Iniciativa, tu propuesta y tus datos de contacto se envían de forma privada a los Líderes y DAE de tu sede.</p>
-<form method="post" action="{% url 'core:foro' %}" enctype="multipart/form-data">{% csrf_token %}{% include 'partials/formulario.html' %}<img id="vista-previa-foro" class="foto-foro rounded mb-3" alt="Vista previa de la foto seleccionada" hidden><button class="btn btn-primary">Publicar en mi sede</button></form></section>
-<nav class="d-flex flex-wrap gap-2 mb-4" aria-label="Filtrar publicaciones">
-<a class="btn {% if not etiqueta %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?q={{ busqueda_actual|urlencode }}">Todas</a>
+<nav class="foro-filtros d-flex flex-wrap gap-2 mb-3" aria-label="Filtrar publicaciones">
+<a class="btn {% if not etiqueta %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?q={{ busqueda_actual|urlencode }}">Todo</a>
 <a class="btn {% if etiqueta == 'AHORA_MISMO' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=AHORA_MISMO&amp;q={{ busqueda_actual|urlencode }}">#AhoraMismo</a>
-<a class="btn {% if etiqueta == 'NOTICIA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=NOTICIA&amp;q={{ busqueda_actual|urlencode }}">#Noticia</a>
+<a class="btn {% if etiqueta == 'NOTICIA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=NOTICIA&amp;q={{ busqueda_actual|urlencode }}">#Noticias</a>
 <a class="btn {% if etiqueta == 'INICIATIVA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=INICIATIVA&amp;q={{ busqueda_actual|urlencode }}">#Iniciativa</a></nav>
-<section aria-label="Publicaciones de tu sede">
+<div class="foro-cabecera mb-3"><span class="perfil-sobrelinea">LA VIDA DE TU SEDE</span>{% if user.sede_usu_id %}<a class="btn btn-primary" href="{% url 'core:crear_publicacion' %}">Crear publicación</a>{% endif %}</div>
+{% if user.sede_usu_id %}<div class="foro-publicaciones"><section aria-label="Publicaciones de tu sede">
 {% for publicacion in publicaciones %}
 <article id="publicacion-{{ publicacion.pk }}" class="card event-card event-reveal mb-4">
 <div class="card-body p-4"><header class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><a href="{% url 'core:ver_perfil' publicacion.aut_publ.pk %}"><strong>{{ publicacion.aut_publ.nom_usu|default:publicacion.aut_publ.username }}</strong></a><span class="badge category-badge ms-2">{{ publicacion.aut_publ.get_rol_usu_display }}</span><div class="text-secondary small mt-1">{{ publicacion.aut_publ.carr_usu }} · <time datetime="{{ publicacion.fech_publ|date:'c' }}">{{ publicacion.fech_publ|date:'d M Y · H:i' }}</time></div></div><span class="badge text-bg-danger align-self-start">{% if publicacion.etiq_publ == 'AHORA_MISMO' %}#AhoraMismo{% elif publicacion.etiq_publ == 'NOTICIA' %}#Noticia{% else %}#Iniciativa{% endif %}</span></header>
@@ -25,6 +21,5 @@
 {% if publicacion_error == publicacion.pk %}<div class="text-danger small" role="alert">{{ comentario_form.errors }}</div>{% endif %}
 <button class="btn btn-outline-dark btn-sm">Comentar</button></form></section></div></article>
 {% empty %}<p class="empty-state">Todavía no hay publicaciones{% if etiqueta %} con esta etiqueta{% endif %}. ¡Comparte algo con tu sede!</p>{% endfor %}
-</section></div></div>
-{% else %}<p class="empty-state">Necesitas una sede asignada para participar en el foro. Contacta a la DAE.</p>{% endif %}
+</section></div>{% else %}<p class="empty-state">Necesitas una sede asignada para participar en el foro.</p>{% endif %}
 {% endblock %}

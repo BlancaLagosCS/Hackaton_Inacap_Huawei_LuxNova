@@ -117,7 +117,7 @@ class CuentasV10Tests(TestCase):
 
     # Recibe rol, nickname y RUT de prueba; devuelve datos válidos para crear una cuenta institucional.
     def cuenta(self, rol='DAE', username='nueva_dae', rut='44444444-4'):
-        return {'nom_usu': 'Cuenta institucional ficticia', 'username': username, 'rut_usu': rut, 'corr_usu': f'{username}@inacap.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'rol_usu': rol, 'password': 'ClaveInicial-45!'}
+        return {'nom_usu': 'Cuenta institucional ficticia', 'username': username, 'rut_usu': rut, 'corr_usu': f'{username}@inacap.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática', 'rol_usu': rol, 'password': 'ClaveInicial-45!'}
 
     # Recibe cambio válido de nickname/correo/clave; verifica hash, sesión conservada e imposibilidad de editar rol/RUT.
     def test_configuracion_y_sesion(self):
@@ -190,7 +190,7 @@ class CuentasV10Tests(TestCase):
 
     # Recibe rutas autenticadas del flujo estudiantil; verifica un solo DM global, Bootstrap Icons y ausencia de formularios antiguos en perfil.
     def test_dm_global_y_perfil_limpio(self):
-        for ruta in ['/', '/foro/', '/inbox/', '/perfil/', '/perfil/configuracion/', '/club/postular/']:
+        for ruta in ['/', '/foro/', '/mensajes/', '/perfil/', '/perfil/configuracion/', '/club/postular/']:
             respuesta = self.client.get(ruta)
             self.assertEqual(respuesta.status_code, 200)
             html = respuesta.content.decode()
@@ -239,7 +239,7 @@ class MensajeriaV9Tests(TestCase):
     def setUp(self):
         self.sede = Sede.objects.create(nom_sede='Sede DM A', dir_sede='Demo')
         self.otra = Sede.objects.create(nom_sede='Sede DM B', dir_sede='Demo')
-        self.alicia = self.usuario('luz_nova', 'Alicia Ficticia', carrera='Ing. Informática (4 años)')
+        self.alicia = self.usuario('luz_nova', 'Alicia Ficticia', carrera='Ing. Informática')
         self.beto = self.usuario('betito', 'Roberto Ficticio', carrera='Técnico Mecánica')
         self.tercero = self.usuario('tercero', 'Otra Persona', sede=self.otra)
         self.dae = self.usuario('gestor', 'DAE Ficticio', rol='DAE')
@@ -247,8 +247,8 @@ class MensajeriaV9Tests(TestCase):
         self.client.force_login(self.alicia)
 
     # Recibe datos de prueba y devuelve una cuenta sintética con identificador único y año de ingreso para gráficos temporales.
-    def usuario(self, nickname, nombre, rol='ESTUDIANTE', carrera='Ing. Informática (4 años)', sede=None):
-        return Usuario.objects.create_user(username=nickname, nom_usu=nombre, rut_usu=f'DEMO-{nickname}', corr_usu=f'{nickname}@inacapmail.cl', rol_usu=rol, sede_usu=sede or self.sede, carr_usu=carrera, anio_usu=2025)
+    def usuario(self, nickname, nombre, rol='ESTUDIANTE', carrera='Ing. Informática', sede=None):
+        return Usuario.objects.create_user(username=nickname, nom_usu=nombre, rut_usu=f'DEMO-{nickname}', corr_usu=f'{nickname}@inacapmail.cl', rol_usu=rol, sede_usu=sede or self.sede, carr_usu=carrera)
 
     # Recibe búsquedas por nombre y nickname; comprueba privacidad, exclusiones y selección de avalistas solo de la sede.
     def test_busqueda_unificada(self):
@@ -325,7 +325,7 @@ class MensajeriaV9Tests(TestCase):
     # Recibe un alta válida por la vista; verifica que bienvenida y sesión queden conectadas con el canal oficial.
     def test_bienvenida_registro(self):
         self.client.logout()
-        datos = {'username': 'nuevo_v9', 'nom_usu': 'Persona Ficticia', 'rut_usu': '88888888-8', 'corr_usu': 'nuevo_v9@inacapmail.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'anio_usu': 2025, 'password1': 'ClaveFicticia-894!', 'password2': 'ClaveFicticia-894!'}
+        datos = {'username': 'nuevo_v9', 'nom_usu': 'Persona Ficticia', 'rut_usu': '88888888-8', 'corr_usu': 'nuevo_v9@inacapmail.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática', 'password1': 'ClaveFicticia-894!', 'password2': 'ClaveFicticia-894!'}
         self.assertRedirects(self.client.post('/registro/', datos), '/')
         usuario = Usuario.objects.get(username='nuevo_v9')
         self.assertTrue(MensajeDirecto.objects.filter(rec_mens=usuario, emi_mens__username='sistema', cont_mens__contains='Bienvenido').exists())
@@ -354,7 +354,8 @@ class MensajeriaV9Tests(TestCase):
         self.assertContains(home, '1234****')
         self.assertNotContains(home, self.alicia.rut_usu)
         self.assertNotContains(home, 'Pre-inscribirme')
-        self.assertContains(home, 'Distribución temporal por año de ingreso')
+        self.assertNotContains(home, 'año de ingreso')
+        self.assertContains(home, 'Inscritos por carrera')
         filas = self.client.get('/perfil/gestion/').context['dashboard_participacion']['barras']
         self.assertEqual(sum(f['total'] for f in filas), 2)
         self.client.force_login(self.jefe)
@@ -404,13 +405,13 @@ class IntervalosV8Tests(TestCase):
 
     # Recibe horas relativas de inicio/fin y campos opcionales; devuelve un evento sintético con intervalo explícito.
     def evento(self, inicio, fin, **campos):
-        datos = {'tit_even': 'Reserva ficticia', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'sede_even': self.sede, 'esp_even': 'Auditorio Principal', 'crea_even': self.dae, 'fech_even': self.base + timedelta(hours=inicio), 'ffin_even': self.base + timedelta(hours=fin) if fin is not None else None}
+        datos = {'orga_even': 'PERSONAL', 'tit_even': 'Reserva ficticia', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'sede_even': self.sede, 'esp_even': 'Auditorio Principal', 'crea_even': self.dae, 'fech_even': self.base + timedelta(hours=inicio), 'ffin_even': self.base + timedelta(hours=fin) if fin is not None else None}
         datos.update(campos)
         return Evento.objects.create(**datos)
 
     # Recibe inicio y término relativos; devuelve datos HTML5 de solicitud en hora local.
     def datos(self, inicio=0, fin=2):
-        return {'tit_even': 'Solicitud v8', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(self.base + timedelta(hours=inicio)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(self.base + timedelta(hours=fin)).strftime('%Y-%m-%dT%H:%M')}
+        return {'orga_even': 'PERSONAL', 'tit_even': 'Solicitud v8', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(self.base + timedelta(hours=inicio)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(self.base + timedelta(hours=fin)).strftime('%Y-%m-%dT%H:%M')}
 
     # Recibe fin igual/anterior/ausente; verifica rechazo de formularios y aceptación de un intervalo futuro válido.
     def test_orden_y_obligatoriedad(self):
@@ -500,8 +501,8 @@ class BuzonV5Tests(TestCase):
             aval.refresh_from_db()
             self.assertEqual(aval.est_aval, 'ACEPTADO')
             self.assertIsNotNone(aval.fech_aval)
-        notificaciones = MensajeInbox.objects.filter(tipo_inbo='SISTEMA', club_inbo=self.club)
-        self.assertEqual(set(notificaciones.values_list('dest_inbo_id', flat=True)), {self.creador.pk, self.dae.pk})
+        notificaciones = MensajeDirecto.objects.filter(cont_mens__contains='completó sus 4 avales')
+        self.assertEqual(set(notificaciones.values_list('rec_mens_id', flat=True)), {self.creador.pk, self.dae.pk})
         self.responder(self.avales[-1])
         self.responder(self.avales[-1], 'RECHAZADO')
         self.assertEqual(notificaciones.count(), 2)
@@ -516,7 +517,7 @@ class BuzonV5Tests(TestCase):
             self.responder(aval)
         self.club.refresh_from_db()
         self.assertEqual(self.club.est_club, 'PENDIENTE_AVALES')
-        self.assertEqual(MensajeInbox.objects.filter(tipo_inbo='SISTEMA', dest_inbo=self.creador).count(), 1)
+        self.assertEqual(MensajeDirecto.objects.filter(rec_mens=self.creador, cont_mens__contains='rechazó el aval').count(), 1)
 
     # Recibe accesos inválidos; verifica dueño, POST, sede y CSRF sin mutaciones ajenas.
     def test_permisos(self):
@@ -533,22 +534,22 @@ class BuzonV5Tests(TestCase):
         Usuario.objects.filter(pk=self.avales[0].estu_aval_id).update(sede_usu=self.otra)
         self.assertEqual(self.client.post(url, {'decision': 'ACEPTADO'}).status_code, 403)
 
-    # Recibe avisos y avales pendientes; verifica lectura propia y preservación del contador hasta responder.
+    # Recibe un aval y mensajes propios/ajenos; verifica acciones en DM oficial y lectura separada del buz?n.
     def test_lectura_y_contador(self):
         usuario = self.avales[0].estu_aval
-        sistema = MensajeInbox.objects.create(dest_inbo=usuario, tipo_inbo='SISTEMA', asun_inbo='Solo propio', cuer_inbo='Aviso')
-        ajeno = MensajeInbox.objects.create(dest_inbo=self.creador, tipo_inbo='SISTEMA', asun_inbo='Mensaje privado ajeno', cuer_inbo='Oculto')
         self.client.force_login(usuario)
-        respuesta = self.client.get('/inbox/')
-        self.assertContains(respuesta, 'Aceptar Aval')
-        self.assertNotContains(respuesta, ajeno.asun_inbo)
-        self.assertEqual(respuesta.context['inbox_no_leidos'], 1)
-        sistema.refresh_from_db()
-        ajeno.refresh_from_db()
-        self.assertTrue(sistema.leid_inbo)
-        self.assertFalse(ajeno.leid_inbo)
+        self.assertEqual(self.client.get('/inbox/').status_code, 403)
+        sistema = Usuario.objects.get(username='sistema')
+        url = reverse('core:dm_hilo', args=[sistema.pk])
+        datos = self.client.get(url).json()
+        solicitud = next(m for m in datos['mensajes'] if m.get('aval'))
+        self.assertTrue(solicitud['aval']['pendiente'])
+        self.assertEqual(solicitud['aval']['id'], self.avales[0].pk)
         self.responder(self.avales[0])
-        self.assertEqual(self.client.get('/inbox/').context['inbox_no_leidos'], 0)
+        datos = self.client.get(url).json()
+        solicitud = next(m for m in datos['mensajes'] if m.get('aval'))
+        self.assertFalse(solicitud['aval']['pendiente'])
+        self.assertEqual(solicitud['aval']['estado'], 'ACEPTADO')
 
     # Recibe iniciativas propias, ajenas y de otra sede; verifica filtro servidor por rol, destinatario y sede.
     def test_privacidad_iniciativas(self):
@@ -558,7 +559,7 @@ class BuzonV5Tests(TestCase):
             MensajeInbox.objects.create(dest_inbo=usuario, tipo_inbo='INICIATIVA_BUZON', publ_inbo=publicacion, asun_inbo='Iniciativa demo', cuer_inbo='CONTACTO-PRIVADO-DEMO')
         MensajeInbox.objects.create(dest_inbo=self.dae, tipo_inbo='INICIATIVA_BUZON', publ_inbo=otra, asun_inbo='Iniciativa ajena', cuer_inbo='CONTACTO-OTRA-SEDE')
         self.client.force_login(self.creador)
-        self.assertNotContains(self.client.get('/inbox/'), 'CONTACTO-PRIVADO-DEMO')
+        self.assertEqual(self.client.get('/inbox/').status_code, 403)
         self.client.force_login(self.dae)
         respuesta = self.client.get('/inbox/')
         self.assertContains(respuesta, 'CONTACTO-PRIVADO-DEMO')
@@ -567,7 +568,7 @@ class BuzonV5Tests(TestCase):
     # Recibe correos de diversos dominios; verifica dos permitidos y rechazo de dominios similares o externos.
     def test_dominios(self):
         from .forms import RegistroUsuarioForm
-        datos = {'username': 'nueva', 'nom_usu': 'Persona ficticia', 'rut_usu': '88888888-8', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'anio_usu': timezone.localdate().year, 'password1': 'ClaveDemo-573!', 'password2': 'ClaveDemo-573!'}
+        datos = {'username': 'nueva', 'nom_usu': 'Persona ficticia', 'rut_usu': '88888888-8', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática', 'password1': 'ClaveDemo-573!', 'password2': 'ClaveDemo-573!'}
         for correo in ['nueva@gmail.com', 'nueva@sub.inacap.cl', 'nueva@inacap.cl.ejemplo.com']:
             form = RegistroUsuarioForm({**datos, 'corr_usu': correo})
             self.assertFalse(form.is_valid())
@@ -601,7 +602,7 @@ class BuzonV5Tests(TestCase):
         club = Club.objects.get(nom_club='Club Demo de Innovación LuxNova')
         self.assertEqual(club.est_club, 'PENDIENTE_AVALES')
         self.assertEqual(club.avales.filter(est_aval='PENDIENTE').count(), 4)
-        self.assertEqual(MensajeInbox.objects.filter(club_inbo=club, tipo_inbo='SOLICITUD_AVAL').count(), 4)
+        self.assertEqual(MensajeDirecto.objects.filter(aval_mens__club_aval=club).count(), 4)
         for username in ['est1', 'est2', 'est3', 'est4', 'est5', 'lider_rancagua', 'dae_rancagua']:
             usuario = Usuario.objects.get(username=username)
             dominio = 'inacap.cl' if username == 'dae_rancagua' else 'inacapmail.cl'
@@ -618,7 +619,7 @@ class BuzonV5Tests(TestCase):
     def test_rollback_cuarto_aval(self):
         for aval in self.avales[:3]:
             self.responder(aval)
-        with patch('core.views.MensajeInbox.objects.bulk_create', side_effect=RuntimeError('Fallo simulado')):
+        with patch('core.services.enviar_notificacion_sistema', side_effect=RuntimeError('Fallo simulado')):
             with self.assertRaises(RuntimeError):
                 self.responder(self.avales[3])
         self.club.refresh_from_db()
@@ -641,7 +642,7 @@ class PerfilesV4Tests(TestCase):
 
     # Recibe cambios opcionales y devuelve datos válidos de registro exclusivamente ficticios.
     def datos_registro(self, **cambios):
-        datos = {'username': 'nuevo', 'nom_usu': 'Persona ficticia', 'rut_usu': '44444444-4', 'corr_usu': 'nuevo@inacapmail.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'anio_usu': timezone.localdate().year, 'password1': 'ClaveFicticia-783!', 'password2': 'ClaveFicticia-783!'}
+        datos = {'username': 'nuevo', 'nom_usu': 'Persona ficticia', 'rut_usu': '44444444-4', 'corr_usu': 'nuevo@inacapmail.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática', 'password1': 'ClaveFicticia-783!', 'password2': 'ClaveFicticia-783!'}
         datos.update(cambios)
         return datos
 
@@ -750,7 +751,7 @@ class FlujosV2Tests(TestCase):
 
     # Comprueba registro, rol forzado, correo único y sesión automática; recibe fixtures y devuelve aserciones.
     def test_registro_y_rol(self):
-        datos = {'username': 'nueva', 'nom_usu': 'Nueva Alumna', 'rut_usu': '11111111-1', 'corr_usu': 'NUEVA@inacap.cl', 'tel_usu': '912345678', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'anio_usu': timezone.localdate().year, 'password1': 'UnaClaveLarga-549!', 'password2': 'UnaClaveLarga-549!', 'rol_usu': 'ADMIN'}
+        datos = {'username': 'nueva', 'nom_usu': 'Nueva Alumna', 'rut_usu': '11111111-1', 'corr_usu': 'NUEVA@inacap.cl', 'tel_usu': '912345678', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática', 'password1': 'UnaClaveLarga-549!', 'password2': 'UnaClaveLarga-549!', 'rol_usu': 'ADMIN'}
         self.assertRedirects(self.client.post(reverse('core:registro'), datos), reverse('core:home'))
         usuario = Usuario.objects.get(username='nueva')
         self.assertEqual(usuario.rol_usu, 'ESTUDIANTE')
@@ -778,13 +779,13 @@ class FlujosV2Tests(TestCase):
         respuesta = self.client.get('/')
         self.assertQuerySetEqual(respuesta.context['eventos_sede'], [self.evento], transform=None)
         self.assertQuerySetEqual(respuesta.context['eventos_intersede'], [self.ajeno], transform=None)
-        self.assertEqual(respuesta.context['inbox_no_leidos'], 1)
+        self.assertEqual(respuesta.context['inbox_no_leidos'], 0)
         Evento.objects.filter(pk=self.evento.pk).update(fech_even=timezone.now() - timedelta(days=1))
         Evento.objects.filter(pk=self.ajeno.pk).update(est_even='PENDIENTE_DAE')
         respuesta = self.client.get('/')
         self.assertFalse(respuesta.context['eventos_sede'].exists())
         self.assertFalse(respuesta.context['eventos_intersede'].exists())
-        for nombre in ['ahora_mismo', 'inbox', 'perfil']:
+        for nombre in ['ahora_mismo', 'perfil']:
             self.assertEqual(self.client.get(reverse('core:' + nombre), follow=True).status_code, 200)
 
     # Comprueba inscripción, cancelación y permisos; recibe fixtures y devuelve aserciones.
@@ -837,7 +838,7 @@ class CierreV6Tests(TestCase):
 
     # Recibe campos opcionales; devuelve un POST de evento futuro con hora local y espacio permitido.
     def datos_evento(self, **cambios):
-        datos = {'tit_even': 'Evento v6', 'desc_even': 'Demostración ficticia', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(timezone.now() + timedelta(days=7, hours=2)).strftime('%Y-%m-%dT%H:%M')}
+        datos = {'orga_even': 'PERSONAL', 'tit_even': 'Evento v6', 'desc_even': 'Demostración ficticia', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M'), 'ffin_even': timezone.localtime(timezone.now() + timedelta(days=7, hours=2)).strftime('%Y-%m-%dT%H:%M')}
         datos.update(cambios)
         return datos
 
@@ -848,7 +849,7 @@ class CierreV6Tests(TestCase):
         club = Club.objects.get(nom_club='Club v6')
         self.assertEqual(club.est_club, 'PENDIENTE_AVALES')
         self.assertEqual(club.avales.count(), 4)
-        self.assertEqual(MensajeInbox.objects.filter(club_inbo=club, tipo_inbo='SOLICITUD_AVAL').count(), 4)
+        self.assertEqual(MensajeDirecto.objects.filter(aval_mens__club_aval=club).count(), 4)
         for aval in club.avales.select_related('estu_aval'):
             self.client.force_login(aval.estu_aval)
             self.client.post(reverse('core:responder_aval', args=[aval.pk]), {'decision': 'ACEPTADO'})

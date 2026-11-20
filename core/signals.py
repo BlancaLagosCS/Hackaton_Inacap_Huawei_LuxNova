@@ -1,7 +1,7 @@
 from django.db.models.signals import post_migrate, post_save
 from django.dispatch import receiver
 
-from .models import MensajeInbox
+from .models import AvalClub, MensajeInbox
 from .utils import asegurar_usuario_sistema, enviar_notificacion_sistema
 
 
@@ -16,6 +16,12 @@ def crear_cuenta_sistema(sender, using, **kwargs):
 @receiver(post_save, sender=MensajeInbox, dispatch_uid='core_inbox_a_dm')
 def notificar_desde_inbox(sender, instance, created, raw=False, **kwargs):
     if created and not raw:
+        if instance.tipo_inbo == 'SOLICITUD_AVAL':
+            from .services import notificar_solicitud_aval
+            aval = AvalClub.objects.filter(club_aval_id=instance.club_inbo_id, estu_aval_id=instance.dest_inbo_id).first()
+            if aval:
+                notificar_solicitud_aval(aval)
+                return
         texto = ('Recibiste una iniciativa en tu Buzón de sugerencias.' if instance.tipo_inbo == 'INICIATIVA_BUZON'
                  else f'{instance.asun_inbo}\n{instance.cuer_inbo}')
         enviar_notificacion_sistema(instance.dest_inbo, texto)

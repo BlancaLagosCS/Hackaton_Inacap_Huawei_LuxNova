@@ -73,8 +73,8 @@ class RegistroForm(UserCreationForm):
     # Declara los campos editables; recibe metadatos y configura el formulario de registro.
     class Meta:
         model = Usuario
-        fields = ('username', 'nom_usu', 'rut_usu', 'corr_usu', 'tel_usu', 'sede_usu', 'carr_usu', 'anio_usu')
-        labels = {'nom_usu': 'Nombre completo', 'rut_usu': 'RUT', 'corr_usu': 'Correo institucional', 'tel_usu': 'Teléfono', 'carr_usu': 'Carrera', 'anio_usu': 'Año de ingreso'}
+        fields = ('username', 'nom_usu', 'rut_usu', 'corr_usu', 'tel_usu', 'sede_usu', 'carr_usu')
+        labels = {'nom_usu': 'Nombre completo', 'rut_usu': 'RUT', 'corr_usu': 'Correo institucional', 'tel_usu': 'Teléfono', 'carr_usu': 'Carrera'}
 
     # Recibe datos y opciones del formulario; devuelve campos obligatorios con estilos Bootstrap.
     def __init__(self, *args, **kwargs):
@@ -82,9 +82,6 @@ class RegistroForm(UserCreationForm):
         for name, field in self.fields.items():
             field.required = True
             field.widget.attrs['class'] = 'form-select' if name in ('sede_usu', 'carr_usu') else 'form-control'
-        self.fields['anio_usu'].min_value = 1900
-        self.fields['anio_usu'].max_value = timezone.localdate().year
-        self.fields['anio_usu'].widget.attrs.update(min=1900, max=timezone.localdate().year)
 
     # Recibe el correo validado sintácticamente; devuelve su forma normalizada o un error por duplicado.
     def clean_corr_usu(self):
@@ -100,13 +97,6 @@ class RegistroForm(UserCreationForm):
         if Usuario.objects.filter(rut_usu__iexact=rut).exists():
             raise forms.ValidationError('Este RUT ya se encuentra registrado en el sistema.')
         return rut
-
-    # Recibe el año de ingreso; devuelve un año válido o un error de rango.
-    def clean_anio_usu(self):
-        anio = self.cleaned_data['anio_usu']
-        if not 1900 <= anio <= timezone.localdate().year:
-            raise forms.ValidationError('Ingresa un año de ingreso válido.')
-        return anio
 
     # Recibe la opción de persistir; devuelve un usuario cuyo rol inicial siempre es ESTUDIANTE.
     def save(self, commit=True):
@@ -312,16 +302,29 @@ ESPACIOS_CHOICES = [(nombre, nombre) for nombre in ('Auditorio Principal', 'Sala
 
 # Recibe datos de evento y banner opcional; devuelve una solicitud validada sin permitir elegir creador, sede o aprobación.
 class SolicitarEventoForm(forms.ModelForm):
+    club_even = forms.ModelChoiceField(queryset=Club.objects.none(), required=False, label='Club responsable', empty_label='Selecciona el club responsable', widget=forms.Select(attrs={'class': 'form-select'}))
     esp_even = forms.ChoiceField(choices=ESPACIOS_CHOICES, label='Espacio institucional', widget=forms.Select(attrs={'class': 'form-select'}))
     ffin_even = forms.DateTimeField(label='Fecha y hora de término', required=True, widget=forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'}))
 
     # Recibe metadatos de Evento y configura sus campos públicos y fecha local HTML5.
     class Meta:
         model = Evento
-        fields = ('tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even', 'ffin_even')
-        labels = {'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora de inicio'}
+        fields = ('orga_even', 'club_even', 'tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even', 'ffin_even')
+        labels = {'orga_even': '¿En calidad de qué organizas este evento?', 'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora de inicio'}
         help_texts = {'ban_even': 'Tamaño recomendado: 1200 × 400 px (formato banner horizontal 3:1, JPG o PNG, máx. 3 MB).'}
         widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
+
+    # Recibe al organizador y datos opcionales; ofrece exclusivamente clubes aprobados que lidera en su sede.
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['orga_even'].widget.attrs['class'] = 'form-select'
+        rol = {'LIDER_ESTUDIANTIL': 'líder estudiantil', 'DELEGADO': 'delegado', 'JEFATURA': 'jefatura de carrera', 'ADMIN': 'administrador'}.get(user.rol_usu if user else '', 'organizador')
+        self.fields['orga_even'].choices = [('', 'Selecciona cómo organizas el evento'), ('PERSONAL', f'Como {rol} (a título personal)'), ('CLUB', 'En nombre de un club estudiantil')]
+        self.fields['orga_even'].initial = ''
+        self.fields['club_even'].help_text = 'Elige un club aprobado que lideres. Si organizas a título personal, deja este campo vacío.'
+        if user and user.sede_usu_id:
+            self.fields['club_even'].queryset = Club.objects.filter(lid_club=user, sede_club_id=user.sede_usu_id, est_club='APROBADO').order_by('nom_club')
+        self.fields['club_even'].label_from_instance = str_nombre_club
 
     # Recibe banner opcional del evento y devuelve el archivo validado con máximo de 3 MB.
     def clean_ban_even(self):
@@ -340,4 +343,13 @@ class SolicitarEventoForm(forms.ModelForm):
         inicio, termino = datos.get('fech_even'), datos.get('ffin_even')
         if inicio and termino and termino <= inicio:
             raise forms.ValidationError('La fecha y hora de término debe ser posterior a la de inicio.')
+        if datos.get('orga_even') == 'CLUB' and not datos.get('club_even'):
+            self.add_error('club_even', 'Selecciona el club aprobado responsable del evento.')
+        if datos.get('orga_even') == 'PERSONAL' and datos.get('club_even'):
+            self.add_error('club_even', 'Un evento a título personal no puede asignarse a un club.')
         return datos
+
+
+# Recibe un club consultado por el selector; devuelve su nombre legible, sin alterar sus datos.
+def str_nombre_club(club):
+    return club.nom_club

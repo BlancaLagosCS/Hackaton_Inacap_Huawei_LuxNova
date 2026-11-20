@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import AvalClub, CARRERAS_CHOICES, Club, Evento, MensajeInbox, PublicacionForo, Sede, Usuario
-from core.services import notificar_iniciativa
+from core.services import notificar_iniciativa, notificar_solicitud_aval
 from core.utils import asegurar_usuario_sistema
 
 
@@ -33,7 +33,7 @@ class Command(BaseCommand):
             usuario, nuevo = Usuario.objects.update_or_create(username=username, defaults={
                 'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': correo,
                 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0],
-                'anio_usu': timezone.localdate().year, 'rol_usu': rol, 'is_active': True,
+                'rol_usu': rol, 'is_active': True,
                 'is_staff': username == 'root_admin', 'is_superuser': username == 'root_admin'})
             usuario.set_password(clave)
             usuario.save(update_fields=['password'])
@@ -57,8 +57,8 @@ class Command(BaseCommand):
         club, _ = Club.objects.get_or_create(nom_club='Club Demo de Innovación LuxNova', lid_club=proponente, sede_club=sedes[0], defaults={'cat_club': 'DESARROLLO_ACADEMICO', 'desc_club': 'Club ficticio para demostrar cuatro avales de pares.'})
         for numero in range(2, 6):
             estudiante = Usuario.objects.get(username=f'est{numero}')
-            AvalClub.objects.get_or_create(club_aval=club, estu_aval=estudiante)
-            MensajeInbox.objects.get_or_create(dest_inbo=estudiante, club_inbo=club, tipo_inbo='SOLICITUD_AVAL', defaults={'asun_inbo': 'Solicitud de aval de club', 'cuer_inbo': f'{proponente.nom_usu} solicita tu aval para {club.nom_club}. Acepta o rechaza desde tu buzón.'})
+            aval, _ = AvalClub.objects.get_or_create(club_aval=club, estu_aval=estudiante)
+            notificar_solicitud_aval(aval)
         # Actualiza los contactos de avisos demo existentes después del cambio de dominio, sin duplicar mensajes.
         for publicacion in PublicacionForo.objects.filter(aut_publ=proponente, etiq_publ='INICIATIVA'):
             cuerpo = f'{publicacion.cont_publ}\n\nContacto del proponente:\nNombre: {proponente.nom_usu}\nCarrera: {proponente.carr_usu}\nCorreo: {proponente.corr_usu}\nTeléfono: {proponente.tel_usu}'

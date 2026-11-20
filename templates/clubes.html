@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between mb-4"><p>Encuentra una comunidad y participa en sus actividades.</p><a class="btn btn-outline-light" href="{% url 'core:mis_clubes' %}">Mis clubes y sus eventos</a></div>
+<div class="row g-3">{% for club in clubes %}<div class="col-md-6"><article class="card h-100 p-4"><span class="small text-secondary">{{ club.total_miembros }} miembros{% if club.pk in membresias_ids %} · Ya eres miembro{% endif %}</span><h2 class="h4 mt-2">{{ club.nom_club }}</h2><p>{{ club.desc_club }}</p><p class="small">Lidera <a href="{% url 'core:ver_perfil' club.lid_club_id %}">{{ club.lid_club.nom_usu|default:club.lid_club.username }}</a></p><a class="btn btn-primary mt-auto align-self-start" href="{% url 'core:detalle_club' club.pk %}">Ver club</a></article></div>{% empty %}<p class="empty-state">Aún no hay clubes aprobados en tu sede.</p>{% endfor %}</div>
+{% endblock %}
