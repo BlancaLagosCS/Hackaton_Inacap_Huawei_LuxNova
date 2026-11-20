@@ -82,7 +82,7 @@ body a { color: #FFFFFF; }
 .dm-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .aval-chip { display: inline-flex; align-items: center; gap: .5rem; background: #E9A0A2; color: #1A1A1A; border-radius: 999px; padding: .4rem .8rem; }
 .aval-chip button { border: 0; background: transparent; color: #1A1A1A; font-size: 1.2rem; line-height: 1; }
-.dm-flotante { position: fixed; bottom: 24px; right: 24px; z-index: 1050; background: #E61E28; color: #FFFFFF; border: 2px solid #FFFFFF; border-radius: 50%; width: 60px; height: 60px; box-shadow: 0 4px 20px #1A1A1A40; }
+.dm-flotante { position: fixed; bottom: 24px; right: 24px; z-index: 1060; background-color: #E61E28; color: #FFFFFF; border: 2px solid #FFFFFF; border-radius: 50%; width: 58px; height: 58px; box-shadow: 0 4px 20px #1A1A1A40; }
 .dm-flotante .badge { position: absolute; right: -3px; top: -5px; background: #1A1A1A; color: #FFFFFF; }
 .dm-drawer.offcanvas { top: auto; bottom: 94px; right: 24px; height: min(650px, calc(100dvh - 120px)); width: min(850px, calc(100vw - 48px)); border-radius: 20px; background: #FFFFFF; color: #1A1A1A; overflow: hidden; }
 .dm-drawer .offcanvas-header { flex-shrink: 0; }

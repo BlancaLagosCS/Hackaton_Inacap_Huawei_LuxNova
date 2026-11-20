@@ -37,6 +37,27 @@ def validar_rut_chileno(rut_raw):
     return f'{cuerpo}-{esperado}'
 
 
+# Recibe nickname y PK opcional del propietario; devuelve un identificador sin espacios, no reservado y único sin distinguir mayúsculas.
+def validar_nickname_unico(valor, usuario_pk=None):
+    if any(caracter.isspace() for caracter in valor):
+        raise forms.ValidationError('El nickname no puede contener espacios.')
+    if valor.lower() == 'sistema':
+        raise forms.ValidationError('Este nombre está reservado para el canal oficial.')
+    if Usuario.objects.exclude(pk=usuario_pk).filter(username__iexact=valor).exists():
+        raise forms.ValidationError('Este nickname ya está en uso por otro usuario.')
+    return valor
+
+
+# Recibe correo y PK opcional del dueño; devuelve correo institucional normalizado y único o un error legible.
+def validar_correo_unico(valor, usuario_pk=None):
+    correo = valor.strip().lower()
+    if correo.rsplit('@', 1)[-1] not in ('inacapmail.cl', 'inacap.cl'):
+        raise forms.ValidationError('El correo debe ser institucional (@inacapmail.cl o @inacap.cl).')
+    if Usuario.objects.exclude(pk=usuario_pk).filter(corr_usu__iexact=correo).exists():
+        raise forms.ValidationError('Este correo institucional ya está registrado.')
+    return correo
+
+
 # Construye opciones legibles; recibe una sede y devuelve su nombre institucional.
 class SelectorSede(forms.ModelChoiceField):
     # Recibe una sede consultada y devuelve la etiqueta del selector.
@@ -67,19 +88,11 @@ class RegistroForm(UserCreationForm):
 
     # Recibe el correo validado sintácticamente; devuelve su forma normalizada o un error por duplicado.
     def clean_corr_usu(self):
-        correo = self.cleaned_data['corr_usu'].strip().lower()
-        if correo.rsplit('@', 1)[-1] not in ('inacapmail.cl', 'inacap.cl'):
-            raise forms.ValidationError('El correo debe ser institucional (@inacapmail.cl o @inacap.cl).')
-        if Usuario.objects.filter(corr_usu__iexact=correo).exists():
-            raise forms.ValidationError('Este correo institucional ya está registrado.')
-        return correo
+        return validar_correo_unico(self.cleaned_data['corr_usu'])
 
     # Recibe el nombre de cuenta; reserva sistema sin distinguir mayúsculas y devuelve un identificador permitido.
     def clean_username(self):
-        username = super().clean_username()
-        if username.lower() == 'sistema':
-            raise forms.ValidationError('Este nombre está reservado para el canal oficial.')
-        return username
+        return validar_nickname_unico(super().clean_username())
 
     # Recibe el RUT enviado; devuelve su forma validada y normalizada o un error claro de duplicación.
     def clean_rut_usu(self):
@@ -123,6 +136,92 @@ class EditarPerfilForm(forms.ModelForm):
     # Recibe foto nueva, existente o marca de borrado; devuelve el valor validado con máximo de 2 MB para subidas nuevas.
     def clean_foto_usu(self):
         return validar_imagen_subida(self.cleaned_data.get('foto_usu'), 2)
+
+
+# Recibe datos del propietario autenticado; valida foto/bio, nickname, correo y cambio opcional de contraseña sin editar roles ni identidad institucional.
+class ConfiguracionCuentaForm(EditarPerfilForm):
+    username = forms.CharField(label='Nickname', max_length=150, strip=False, widget=forms.TextInput(attrs={'class': 'form-control', 'autocomplete': 'username'}))
+    nueva_password = forms.CharField(label='Nueva contraseña (opcional)', min_length=6, required=False, strip=False, widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}), help_text='Mínimo 6 caracteres. Deja ambos campos vacíos para conservar tu contraseña.')
+    confirmar_password = forms.CharField(label='Confirmar nueva contraseña', required=False, strip=False, widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}))
+
+    # Recibe metadatos de perfil y define los únicos cuatro campos persistentes permitidos, junto a las contraseñas auxiliares.
+    class Meta(EditarPerfilForm.Meta):
+        fields = ('foto_usu', 'bio_usu', 'username', 'corr_usu')
+        labels = {**EditarPerfilForm.Meta.labels, 'corr_usu': 'Correo institucional'}
+        help_texts = {'foto_usu': '400 × 400 px recomendado. JPG, PNG o WebP, máx. 2 MB.'}
+        widgets = {**EditarPerfilForm.Meta.widgets, 'corr_usu': forms.EmailInput(attrs={'class': 'form-control', 'autocomplete': 'email'})}
+
+    # Recibe el nickname editado; devuelve el valor validado excluyendo al propietario en la consulta de unicidad.
+    def clean_username(self):
+        return validar_nickname_unico(self.cleaned_data['username'], self.instance.pk)
+
+    # Recibe correo editado; devuelve el correo institucional normalizado y único, excluyendo al propio usuario.
+    def clean_corr_usu(self):
+        return validar_correo_unico(self.cleaned_data['corr_usu'], self.instance.pk)
+
+    # Recibe campos limpios y devuelve datos o errores cuando las dos contraseñas opcionales no coinciden.
+    def clean(self):
+        datos = super().clean()
+        nueva, confirmar = datos.get('nueva_password', ''), datos.get('confirmar_password', '')
+        if (nueva or confirmar) and nueva != confirmar:
+            self.add_error('confirmar_password', 'Las contraseñas no coinciden.')
+        return datos
+
+    # Recibe opción de persistir; devuelve al dueño con los campos permitidos y contraseña cifrada solo si se solicitó cambiarla.
+    def save(self, commit=True):
+        usuario = super().save(commit=False)
+        if self.cleaned_data.get('nueva_password'):
+            usuario.set_password(self.cleaned_data['nueva_password'])
+        if commit:
+            usuario.save()
+        return usuario
+
+
+ROLES_INSTITUCIONALES = [(rol, rol) for rol in ('DAE', 'JEFATURA', 'DELEGADO', 'LIDER_ESTUDIANTIL', 'ADMIN')]
+
+
+# Recibe un alta institucional autorizada por la vista; devuelve una cuenta con RUT/correo/nickname válidos y contraseña cifrada.
+class CrearCuentaInstitucionalForm(forms.ModelForm):
+    username = forms.CharField(label='Nickname', max_length=150, strip=False, widget=forms.TextInput(attrs={'class': 'form-control', 'autocomplete': 'off'}))
+    sede_usu = SelectorSede(queryset=Sede.objects.order_by('nom_sede'), label='Sede', required=True)
+    rol_usu = forms.ChoiceField(label='Rol institucional', choices=ROLES_INSTITUCIONALES)
+    password = forms.CharField(label='Contraseña inicial', min_length=6, strip=False, widget=forms.PasswordInput(attrs={'class': 'form-control', 'autocomplete': 'new-password'}))
+
+    # Recibe metadatos de Usuario y limita el alta a datos institucionales, sin flags Django ni campos de privilegio adicionales.
+    class Meta:
+        model = Usuario
+        fields = ('nom_usu', 'username', 'rut_usu', 'corr_usu', 'tel_usu', 'sede_usu', 'carr_usu', 'rol_usu')
+        labels = {'nom_usu': 'Nombre completo', 'rut_usu': 'RUT', 'corr_usu': 'Correo institucional', 'tel_usu': 'Teléfono', 'carr_usu': 'Carrera'}
+
+    # Recibe datos y opciones de ModelForm; aplica Bootstrap y obliga todos los datos de alta, sin devolver valor.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for nombre, campo in self.fields.items():
+            campo.required = True
+            campo.widget.attrs['class'] = 'form-select' if nombre in ('sede_usu', 'carr_usu', 'rol_usu') else 'form-control'
+
+    # Recibe nickname del alta; devuelve un identificador único sin espacios ni suplantación del sistema.
+    def clean_username(self):
+        return validar_nickname_unico(self.cleaned_data['username'])
+
+    # Recibe correo del alta; devuelve un correo institucional único y normalizado.
+    def clean_corr_usu(self):
+        return validar_correo_unico(self.cleaned_data['corr_usu'])
+
+    # Recibe RUT del alta; devuelve su forma Módulo 11 normalizada y única o un error de validación.
+    def clean_rut_usu(self):
+        rut = validar_rut_chileno(self.cleaned_data['rut_usu'])
+        if Usuario.objects.filter(rut_usu__iexact=rut).exists():
+            raise forms.ValidationError('Este RUT ya se encuentra registrado en el sistema.')
+        return rut
+
+    # Recibe opción de persistencia; devuelve la cuenta nueva con contraseña cifrada, sin otorgar flags de superusuario/staff.
+    def save(self, commit=True):
+        usuario = super().save(commit=False)
+        usuario.set_password(self.cleaned_data['password'])
+        if commit:
+            usuario.save()
+        return usuario
 
 
 # Autentica por nombre o correo; recibe credenciales y devuelve un formulario con usuario autenticado.

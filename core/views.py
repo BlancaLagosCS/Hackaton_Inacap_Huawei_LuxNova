@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.contrib.auth import login, logout
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Subquery, Value, When
@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 from django.views.decorators.cache import never_cache
 
-from .forms import ComentarioForoForm, EditarPerfilForm, PostularClubForm, PublicacionForoForm, RegistroUsuarioForm, SolicitarEventoForm
+from .forms import ComentarioForoForm, ConfiguracionCuentaForm, CrearCuentaInstitucionalForm, PostularClubForm, PublicacionForoForm, RegistroUsuarioForm, SolicitarEventoForm
 from .models import AvalClub, Club, ComentarioForo, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
 from .services import notificar_iniciativa
 from .utils import enviar_notificacion_sistema
@@ -84,7 +84,7 @@ def preinscripcion(request, evento_id):
         else:
             evento.asis_even.add(request.user)
             messages.success(request, 'Tu preinscripción fue registrada.')
-    return redirect('core:home')
+    return redirect('core:perfil' if request.POST.get('volver') == 'perfil' else 'core:home')
 
 
 # Recibe una petición autenticada de la ruta antigua y devuelve la redirección al foro canónico.
@@ -243,8 +243,8 @@ def resumen_perfil(visitante, perfil_usuario):
             'total': len(asistentes), 'asistentes': asistentes}
 
 
-# Recibe petición, perfil y formulario opcional; devuelve HTML o métricas JSON sin teléfonos no autorizados.
-def mostrar_perfil(request, perfil_usuario, form=None, negocio=None):
+# Recibe petición, perfil y contexto opcional; devuelve HTML o métricas JSON sin teléfonos no autorizados.
+def mostrar_perfil(request, perfil_usuario, negocio=None):
     resumen = resumen_perfil(request.user, perfil_usuario)
     if request.GET.get('formato') == 'json':
         respuesta = JsonResponse({'resumen': resumen})
@@ -261,20 +261,16 @@ def mostrar_perfil(request, perfil_usuario, form=None, negocio=None):
         'clubes_liderados': Club.objects.filter(lid_club=perfil_usuario, est_club='APROBADO'),
         'publicaciones_perfil': PublicacionForo.objects.filter(aut_publ=perfil_usuario, sede_publ_id=request.user.sede_usu_id).order_by('-fech_publ') if request.user.sede_usu_id else PublicacionForo.objects.none(),
         'publicaciones_count': PublicacionForo.objects.filter(aut_publ=perfil_usuario).count(),
-        'resumen': resumen, 'perfil_form': form,
+        'resumen': resumen,
+        'proximos_inscritos': asistidos.filter(fech_even__gte=timezone.now()).order_by('fech_even') if request.user.pk == perfil_usuario.pk and perfil_usuario.rol_usu == 'ESTUDIANTE' else Evento.objects.none(),
         **(contexto_gestion(request, negocio) if request.user.pk == perfil_usuario.pk else {})})
 
 
-# Recibe GET/POST del propietario; guarda foto/bio permitidas y devuelve su perfil o errores sin editar identidad ni rol.
+# Recibe GET autenticado del propietario y devuelve su perfil de lectura; toda edición se realiza en configuración.
 @login_required
-@require_http_methods(['GET', 'POST'])
+@require_http_methods(['GET'])
 def mi_perfil(request):
-    form = EditarPerfilForm(request.POST if request.method == 'POST' else None, request.FILES or None, instance=request.user)
-    if request.method == 'POST' and form.is_valid():
-        form.save()
-        messages.success(request, 'Foto y biografía actualizadas.')
-        return redirect('core:perfil')
-    return mostrar_perfil(request, request.user, form)
+    return mostrar_perfil(request, request.user)
 
 
 # Recibe GET autenticado y un ID; devuelve el perfil público existente o 404, sin permitir ediciones por esta ruta.
@@ -288,11 +284,10 @@ def ver_perfil(request, usuario_id):
 # Recibe petición del propietario y formularios opcionales; devuelve datos de gestión limitados a su rol y sede.
 def contexto_gestion(request, negocio=None):
     usuario = request.user
-    contexto = {'postulaciones': Club.objects.filter(lid_club=usuario).annotate(aceptados=Count('avales', filter=Q(avales__est_aval='ACEPTADO'))).order_by('-fech_club'),
-                'solicitudes_evento': Evento.objects.filter(crea_even=usuario).order_by('-fech_even')}
+    contexto = {'solicitudes_evento': Evento.objects.filter(crea_even=usuario).order_by('-fech_even')}
     contexto['dashboard_participacion'] = dashboard_participacion(usuario)
-    if usuario.rol_usu == 'ESTUDIANTE':
-        contexto['club_form'] = PostularClubForm(user=usuario)
+    if puede_crear_cuentas(usuario):
+        contexto['cuenta_institucional_form'] = CrearCuentaInstitucionalForm()
     if usuario.rol_usu in ROLES_EVENTO:
         contexto['evento_form'] = SolicitarEventoForm()
     if usuario.sede_usu_id and usuario.rol_usu == 'JEFATURA':
@@ -339,8 +334,9 @@ def postular_club(request):
                     asun_inbo=f'Solicitud de Aval para Club: {club.nom_club}'[:255],
                     cuer_inbo=f"{request.user.nom_usu} te invita a avalar la creación del club '{club.nom_club}' ({club.get_cat_club_display()}). Responde en tu Buzón de sugerencias.")
         messages.success(request, 'Postulación enviada: tus cuatro compañeros recibieron la solicitud de aval.')
-        return redirect('core:perfil')
-    return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'club_form': form})
+        return redirect('core:postular_club')
+    postulaciones = Club.objects.filter(lid_club=request.user).annotate(aceptados=Count('avales', filter=Q(avales__est_aval='ACEPTADO'))).order_by('-fech_club')
+    return render(request, 'postular_club.html', {'form': form, 'postulaciones': postulaciones})
 
 
 # Recibe GET/POST de un gestor; guarda solicitud o aprueba directamente para DAE/ADMIN sin conflicto y devuelve perfil.
@@ -369,7 +365,7 @@ def solicitar_evento(request):
                     enviar_notificacion_sistema(request.user, f'Tu evento {evento.tit_even} fue aprobado y publicado.')
                 messages.success(request, 'Evento publicado.' if directo else 'Solicitud de espacio y evento enviada a la DAE.')
                 return redirect('core:perfil')
-    return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'evento_form': form})
+    return mostrar_perfil(request, request.user, {'evento_form': form})
 
 
 # Recibe POST de DAE/ADMIN y club local; aplica una resolución terminal con ascenso, aviso y auditoría, o devuelve rechazo seguro.
@@ -450,6 +446,55 @@ def cambiar_rol_usuario(request, usuario_id):
             RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Cambió rol de usuario', det_audi=f'Usuario #{usuario.pk} @{usuario.username}; sede #{usuario.sede_usu_id}; {anterior} -> {rol}')
     messages.success(request, 'Rol actualizado.')
     return redirect('core:perfil')
+
+
+# Recibe un usuario autenticado; devuelve si tiene autorización administrativa para crear cuentas humanas institucionales.
+def puede_crear_cuentas(usuario):
+    return usuario.username != 'sistema' and (usuario.rol_usu == 'ADMIN' or usuario.is_superuser)
+
+
+# Recibe GET/POST propio; actualiza solo campos configurables, conserva la sesión tras cambiar clave y devuelve perfil o errores.
+@login_required
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def configuracion_perfil(request):
+    if request.user.username == 'sistema':
+        return HttpResponseForbidden('La cuenta oficial no admite configuración de usuario.')
+    form = ConfiguracionCuentaForm(request.POST if request.method == 'POST' else None, request.FILES or None, instance=request.user)
+    if request.method == 'POST' and form.is_valid():
+        try:
+            with transaction.atomic():
+                usuario = form.save()
+        except IntegrityError:
+            form.add_error(None, 'El nickname o correo institucional ya está registrado. Revisa tus datos.')
+        else:
+            if form.cleaned_data.get('nueva_password'):
+                update_session_auth_hash(request, usuario)
+            messages.success(request, 'Configuración de cuenta actualizada correctamente.')
+            return redirect('core:perfil')
+    return render(request, 'configuracion_perfil.html', {'form': form})
+
+
+# Recibe GET/POST de ADMIN/superusuario; crea cuenta, bienvenida DM y auditoría atómicamente, y devuelve el perfil o formulario con errores.
+@login_required
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def crear_cuenta_institucional(request):
+    if not puede_crear_cuentas(request.user):
+        return HttpResponseForbidden('Solo ADMIN o superusuarios pueden crear cuentas institucionales.')
+    form = CrearCuentaInstitucionalForm(request.POST if request.method == 'POST' else None)
+    if request.method == 'POST' and form.is_valid():
+        try:
+            with transaction.atomic():
+                usuario = form.save()
+                enviar_notificacion_sistema(usuario, f'Bienvenido a INACAP Smart, {usuario.nom_usu}. Tu cuenta institucional está lista. Puedes configurar tu nickname y contraseña desde el engranaje de tu perfil.')
+                RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Creó cuenta institucional', det_audi=f'Usuario #{usuario.pk} @{usuario.username}; rol {usuario.rol_usu}; sede #{usuario.sede_usu_id}')
+        except IntegrityError:
+            form.add_error(None, 'El nickname, RUT o correo institucional ya está registrado. Revisa tus datos.')
+        else:
+            messages.success(request, 'Cuenta institucional creada correctamente.')
+            return redirect('core:perfil')
+    return mostrar_perfil(request, request.user, {'cuenta_institucional_form': form})
 
 
 # Recibe un usuario y devuelve solo datos de perfil públicos para buscadores y conversaciones, sin RUT, correo ni teléfono.

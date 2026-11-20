@@ -84,4 +84,4 @@ class GaleriaV7Tests(TestCase):
         respuesta = self.client.get('/perfil/')
         self.assertContains(respuesta, 'Mis publicaciones')
         self.assertContains(respuesta, 'Log Out')
-        self.assertContains(respuesta, '400 × 400 px')
+        self.assertContains(self.client.get('/perfil/configuracion/'), '400 × 400 px')

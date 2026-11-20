@@ -1,5 +1,5 @@
 <div class="col-md-6 col-xl-4 event-reveal">
-  <article class="card event-card h-100">
+  <article id="evento-{{ evento.pk }}" class="card event-card h-100">
     {% if evento.ban_even %}<img src="{{ evento.ban_even.url }}" class="card-img-top banner-evento" alt="Banner de {{ evento.tit_even }}" loading="lazy">{% else %}<div class="banner-evento banner-placeholder" role="img" aria-label="Evento de la comunidad INACAP"><span>ENCUÉNTRATE<br>CON TU COMUNIDAD.</span><small>LuxNova · INACAP</small></div>{% endif %}
     <div class="card-body d-flex flex-column p-4"><span class="badge category-badge align-self-start mb-3">{{ evento.get_cat_even_display }}</span><h3 class="h4">{{ evento.tit_even }}</h3><p class="text-secondary">{{ evento.desc_even }}</p>
       <dl class="event-details"><dt>Inicio</dt><dd><time datetime="{{ evento.fech_even|date:'c' }}">{{ evento.fech_even|date:'d/m/Y H:i' }}</time></dd><dt>Término</dt><dd>{% if evento.ffin_even %}<time datetime="{{ evento.ffin_even|date:'c' }}">{{ evento.ffin_even|date:'d/m/Y H:i' }}</time>{% else %}Sin definir{% endif %}</dd><dt>Sede</dt><dd>{{ evento.sede_even.nom_sede }}</dd><dt>Espacio</dt><dd>{{ evento.esp_even }}</dd></dl>

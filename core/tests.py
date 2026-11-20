@@ -9,6 +9,140 @@ from .forms import validar_rut_chileno
 from .models import AvalClub, Club, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
 
 
+# Recibe una BD aislada; verifica configuración propia, altas institucionales, perfil limpio y DM persistente de v10.
+class CuentasV10Tests(TestCase):
+    # Prepara actores sintéticos con contraseñas de prueba y sede; no recibe datos externos ni devuelve valor.
+    def setUp(self):
+        self.sede = Sede.objects.create(nom_sede='Sede v10 ficticia', dir_sede='Demo')
+        self.estudiante = Usuario.objects.create_user(username='alumno_v10', nom_usu='Alumno Ficticio', rut_usu='11111111-1', corr_usu='alumno_v10@inacapmail.cl', password='Anterior123!', sede_usu=self.sede)
+        self.otro = Usuario.objects.create_user(username='otro_v10', rut_usu='22222222-2', corr_usu='otro_v10@inacapmail.cl', sede_usu=self.sede)
+        self.admin = Usuario.objects.create_user(username='admin_v10', rut_usu='33333333-3', corr_usu='admin_v10@inacap.cl', sede_usu=self.sede, rol_usu='ADMIN')
+        self.client.force_login(self.estudiante)
+
+    # Recibe modificaciones opcionales y devuelve los campos configurables actuales del usuario ficticio.
+    def configuracion(self, **cambios):
+        datos = {'username': self.estudiante.username, 'corr_usu': self.estudiante.corr_usu, 'bio_usu': 'Bio ficticia'}
+        datos.update(cambios)
+        return datos
+
+    # Recibe rol, nickname y RUT de prueba; devuelve datos válidos para crear una cuenta institucional.
+    def cuenta(self, rol='DAE', username='nueva_dae', rut='44444444-4'):
+        return {'nom_usu': 'Cuenta institucional ficticia', 'username': username, 'rut_usu': rut, 'corr_usu': f'{username}@inacap.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'rol_usu': rol, 'password': 'ClaveInicial-45!'}
+
+    # Recibe cambio válido de nickname/correo/clave; verifica hash, sesión conservada e imposibilidad de editar rol/RUT.
+    def test_configuracion_y_sesion(self):
+        datos = self.configuracion(username='nuevo_nickname', corr_usu='NUEVO@INACAP.CL', nueva_password='Clave6', confirmar_password='Clave6', rol_usu='ADMIN', rut_usu='99999999-9')
+        self.assertRedirects(self.client.post('/perfil/configuracion/', datos), '/perfil/')
+        self.estudiante.refresh_from_db()
+        self.assertEqual(self.estudiante.username, 'nuevo_nickname')
+        self.assertEqual(self.estudiante.corr_usu, 'nuevo@inacap.cl')
+        self.assertTrue(self.estudiante.check_password('Clave6'))
+        self.assertEqual(self.estudiante.rol_usu, 'ESTUDIANTE')
+        self.assertEqual(self.estudiante.rut_usu, '11111111-1')
+        self.assertEqual(int(self.client.session['_auth_user_id']), self.estudiante.pk)
+        self.assertEqual(self.client.get('/perfil/').status_code, 200)
+        self.assertEqual(self.client.post('/perfil/', datos).status_code, 405)
+
+    # Recibe duplicados, espacios, correo ajeno y contraseñas inválidas; verifica errores y ausencia de cambios persistidos.
+    def test_validacion_configuracion(self):
+        casos = [({'username': 'OTRO_V10'}, 'username'), ({'username': 'con espacio'}, 'username'),
+                 ({'username': ' espacio'}, 'username'), ({'username': 'SISTEMA'}, 'username'),
+                 ({'corr_usu': 'OTRO_V10@INACAPMAIL.CL'}, 'corr_usu'), ({'corr_usu': 'demo@gmail.com'}, 'corr_usu'),
+                 ({'nueva_password': '12345', 'confirmar_password': '12345'}, 'nueva_password'),
+                 ({'nueva_password': 'Clave6', 'confirmar_password': 'Otra66'}, 'confirmar_password')]
+        for campos, campo in casos:
+            respuesta = self.client.post('/perfil/configuracion/', self.configuracion(**campos))
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertIn(campo, respuesta.context['form'].errors)
+        self.estudiante.refresh_from_db()
+        self.assertTrue(self.estudiante.check_password('Anterior123!'))
+        self.assertRedirects(self.client.post('/perfil/configuracion/', self.configuracion()), '/perfil/')
+        self.estudiante.refresh_from_db()
+        self.assertTrue(self.estudiante.check_password('Anterior123!'))
+
+    # Recibe altas DAE/JEFATURA autorizadas; comprueba contraseña cifrada, bienvenida, auditoría y sesión del creador intacta.
+    def test_crear_cuentas_institucionales(self):
+        self.client.force_login(self.admin)
+        for rol, nombre, rut in [('DAE', 'nueva_dae', '44444444-4'), ('JEFATURA', 'nueva_jefatura', '55555555-5')]:
+            self.assertRedirects(self.client.post('/panel-admin/crear-cuenta/', self.cuenta(rol, nombre, rut)), '/perfil/')
+            usuario = Usuario.objects.get(username=nombre)
+            self.assertEqual(usuario.rol_usu, rol)
+            self.assertTrue(usuario.check_password('ClaveInicial-45!'))
+            self.assertNotEqual(usuario.password, 'ClaveInicial-45!')
+            self.assertFalse(usuario.is_staff or usuario.is_superuser)
+            self.assertTrue(MensajeDirecto.objects.filter(emi_mens__username='sistema', rec_mens=usuario, cont_mens__contains='Bienvenido').exists())
+            self.assertTrue(RegistroAuditoria.objects.filter(dae_audi=self.admin, acc_audi='Creó cuenta institucional', det_audi__contains=f'@{nombre}').exists())
+        self.assertEqual(int(self.client.session['_auth_user_id']), self.admin.pk)
+
+    # Recibe accesos sin rol, superusuario y datos institucionales inválidos; verifica permisos y rechazo de campos no permitidos.
+    def test_permisos_y_validacion_alta(self):
+        self.assertEqual(self.client.post('/panel-admin/crear-cuenta/', self.cuenta()).status_code, 403)
+        self.admin.rol_usu = 'DAE'
+        self.admin.save()
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get('/panel-admin/crear-cuenta/').status_code, 403)
+        self.admin.is_superuser = True
+        self.admin.save()
+        self.assertEqual(self.client.get('/panel-admin/crear-cuenta/').status_code, 200)
+        for cambios, campo in [({'username': 'OTRO_V10'}, 'username'), ({'rut_usu': '44444444-5'}, 'rut_usu'), ({'rut_usu': '11.111.111-1'}, 'rut_usu'), ({'corr_usu': 'demo@gmail.com'}, 'corr_usu'), ({'rol_usu': 'ESTUDIANTE'}, 'rol_usu')]:
+            respuesta = self.client.post('/panel-admin/crear-cuenta/', {**self.cuenta(), **cambios})
+            self.assertIn(campo, respuesta.context['cuenta_institucional_form'].errors)
+        self.assertFalse(Usuario.objects.filter(username='nueva_dae').exists())
+
+    # Simula fallo de auditoría al crear cuenta; comprueba reversión atómica de usuario y bienvenida oficial.
+    def test_rollback_alta(self):
+        self.client.force_login(self.admin)
+        with patch('core.views.RegistroAuditoria.objects.create', side_effect=RuntimeError('Fallo simulado')):
+            with self.assertRaises(RuntimeError):
+                self.client.post('/panel-admin/crear-cuenta/', self.cuenta())
+        self.assertFalse(Usuario.objects.filter(username='nueva_dae').exists())
+        self.assertFalse(MensajeDirecto.objects.filter(cont_mens__contains='Cuenta institucional ficticia').exists())
+
+    # Recibe rutas autenticadas del flujo estudiantil; verifica un solo DM global, Bootstrap Icons y ausencia de formularios antiguos en perfil.
+    def test_dm_global_y_perfil_limpio(self):
+        for ruta in ['/', '/foro/', '/inbox/', '/perfil/', '/perfil/configuracion/', '/club/postular/']:
+            respuesta = self.client.get(ruta)
+            self.assertEqual(respuesta.status_code, 200)
+            html = respuesta.content.decode()
+            self.assertEqual(html.count('id="dmDrawer"'), 1)
+            self.assertIn('class="dm-flotante"', html)
+            self.assertIn('js/dm_drawer.js', html)
+            self.assertIn('bootstrap-icons@1.11.3', html)
+        perfil = self.client.get('/perfil/')
+        self.assertContains(perfil, 'bi-gear-fill')
+        self.assertNotContains(perfil, 'name="foto_usu"')
+        self.assertNotContains(perfil, 'name="avales"')
+        self.assertNotContains(perfil, 'Editar Foto y Biografía')
+        self.client.force_login(self.otro)
+        self.assertNotContains(self.client.get(f'/perfil/{self.estudiante.pk}/'), 'bi-gear-fill')
+
+    # Recibe inscripciones futuras/pasadas y pendientes; verifica prioridad, filtros y cancelación que retorna al perfil.
+    def test_proximos_inscritos(self):
+        eventos = []
+        for titulo, dias, estado in [('Próximo aprobado', 2, 'APROBADO'), ('Pasado', -2, 'APROBADO'), ('Pendiente', 3, 'PENDIENTE_DAE')]:
+            inicio = timezone.now() + timedelta(days=dias)
+            evento = Evento.objects.create(tit_even=titulo, desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, crea_even=self.admin, esp_even='Patio', fech_even=inicio, ffin_even=inicio + timedelta(hours=1), est_even=estado)
+            evento.asis_even.add(self.estudiante)
+            eventos.append(evento)
+        respuesta = self.client.get('/perfil/')
+        self.assertQuerySetEqual(respuesta.context['proximos_inscritos'], [eventos[0]], transform=None)
+        html = respuesta.content.decode()
+        self.assertLess(html.index('Próximos eventos a los que me inscribí'), html.index('Eventos Asistidos</h2>'))
+        self.assertRedirects(self.client.post(reverse('core:preinscripcion', args=[eventos[0].pk]), {'volver': 'perfil'}), '/perfil/')
+        self.assertFalse(eventos[0].asis_even.filter(pk=self.estudiante.pk).exists())
+
+    # Recibe postulación dedicada con cuatro compañeros; verifica formulario fuera del perfil y listado de estado tras enviar.
+    def test_postulacion_dedicada(self):
+        pares = [self.otro]
+        for numero in range(3):
+            pares.append(Usuario.objects.create_user(username=f'par_v10_{numero}', rut_usu=f'FICTICIO-V10-{numero}', corr_usu=f'par{numero}@inacapmail.cl', sede_usu=self.sede))
+        respuesta = self.client.post('/club/postular/', {'nom_club': 'Club dedicado v10', 'cat_club': 'OTRO', 'desc_club': 'Demo', 'avales': [p.pk for p in pares]})
+        self.assertRedirects(respuesta, '/club/postular/')
+        pagina = self.client.get('/club/postular/')
+        self.assertContains(pagina, 'Club dedicado v10')
+        self.assertContains(pagina, '0/4 avales aceptados')
+
+
 # Recibe una BD aislada y prueba búsqueda, DMs privados, canal oficial y dashboards segmentados de v9.
 class MensajeriaV9Tests(TestCase):
     # Prepara participantes ficticios de dos carreras y sedes, más gestores; no recibe datos externos ni devuelve valor.
@@ -470,7 +604,7 @@ class PerfilesV4Tests(TestCase):
         self.assertEqual(self.client.get('/perfil/').status_code, 302)
         self.client.force_login(self.estudiante)
         self.assertEqual(self.client.post(f'/perfil/{self.lider.pk}/', {'bio_usu': 'Intento'}).status_code, 405)
-        self.assertRedirects(self.client.post('/perfil/', {'bio_usu': 'Bio ficticia', 'rol_usu': 'ADMIN'}), '/perfil/')
+        self.assertRedirects(self.client.post('/perfil/configuracion/', {'bio_usu': 'Bio ficticia', 'username': self.estudiante.username, 'corr_usu': self.estudiante.corr_usu, 'rol_usu': 'ADMIN'}), '/perfil/')
         self.estudiante.refresh_from_db()
         self.assertEqual(self.estudiante.bio_usu, 'Bio ficticia')
         self.assertEqual(self.estudiante.rol_usu, 'ESTUDIANTE')
@@ -488,13 +622,13 @@ class PerfilesV4Tests(TestCase):
             buffer = BytesIO()
             Image.new('RGB', (2, 2), color='red').save(buffer, format='PNG')
             foto = SimpleUploadedFile('avatar.png', buffer.getvalue(), content_type='image/png')
-            self.assertRedirects(self.client.post('/perfil/', {'bio_usu': 'Demo', 'foto_usu': foto}), '/perfil/')
+            self.assertRedirects(self.client.post('/perfil/configuracion/', {'bio_usu': 'Demo', 'username': self.estudiante.username, 'corr_usu': self.estudiante.corr_usu, 'foto_usu': foto}), '/perfil/')
             self.estudiante.refresh_from_db()
             self.assertTrue(self.estudiante.foto_usu.name.startswith('perfiles/'))
             falsa = SimpleUploadedFile('falsa.png', b'no es una imagen', content_type='image/png')
-            respuesta = self.client.post('/perfil/', {'bio_usu': 'Demo', 'foto_usu': falsa})
-            self.assertIn('foto_usu', respuesta.context['perfil_form'].errors)
-            self.assertRedirects(self.client.post('/perfil/', {'bio_usu': 'Demo', 'foto_usu-clear': 'on'}), '/perfil/')
+            respuesta = self.client.post('/perfil/configuracion/', {'bio_usu': 'Demo', 'username': self.estudiante.username, 'corr_usu': self.estudiante.corr_usu, 'foto_usu': falsa})
+            self.assertIn('foto_usu', respuesta.context['form'].errors)
+            self.assertRedirects(self.client.post('/perfil/configuracion/', {'bio_usu': 'Demo', 'username': self.estudiante.username, 'corr_usu': self.estudiante.corr_usu, 'foto_usu-clear': 'on'}), '/perfil/')
             self.estudiante.refresh_from_db()
             self.assertFalse(self.estudiante.foto_usu)
 
@@ -620,7 +754,7 @@ class CierreV6Tests(TestCase):
     # Recibe el recorrido completo; verifica cuatro avales, ascenso, auditoría, reserva y publicación del evento aprobado.
     def test_flujo_completo(self):
         self.client.force_login(self.estudiante)
-        self.assertRedirects(self.client.post('/club/postular/', {'nom_club': 'Club v6', 'cat_club': 'OTRO', 'desc_club': 'Demo', 'avales': [u.pk for u in self.pares]}), '/perfil/')
+        self.assertRedirects(self.client.post('/club/postular/', {'nom_club': 'Club v6', 'cat_club': 'OTRO', 'desc_club': 'Demo', 'avales': [u.pk for u in self.pares]}), '/club/postular/')
         club = Club.objects.get(nom_club='Club v6')
         self.assertEqual(club.est_club, 'PENDIENTE_AVALES')
         self.assertEqual(club.avales.count(), 4)

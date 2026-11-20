@@ -1,0 +1,4 @@
+{% extends 'base.html' %}
+{% block title %}Configuración de cuenta · INACAP Smart{% endblock %}
+{% block titulo_vista %}Configuración de cuenta{% endblock %}
+{% block content %}<section class="auth-card mx-auto"><h2 class="h4"><i class="bi bi-gear-fill me-2" aria-hidden="true"></i>Tu cuenta, a tu manera</h2><p class="text-secondary">Actualiza tu foto, biografía, nickname y correo institucional. La contraseña cambia solo si completas ambos campos.</p><form method="post" enctype="multipart/form-data" action="{% url 'core:configuracion_perfil' %}">{% csrf_token %}{% include 'partials/formulario.html' %}<div class="d-flex flex-wrap gap-2 mt-4"><button class="btn btn-primary">Guardar configuración</button><a class="btn btn-outline-dark" href="{% url 'core:perfil' %}">Volver a mi cuenta</a></div></form></section>{% endblock %}
