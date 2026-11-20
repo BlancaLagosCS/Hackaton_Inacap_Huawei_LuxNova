@@ -93,3 +93,12 @@ class RegistroAuditoria(models.Model):
     acc_audi = models.CharField(max_length=255)
     det_audi = models.TextField()
     fech_audi = models.DateTimeField(auto_now_add=True)
+
+
+# Recibe emisor, receptor y texto; conserva mensajes privados y su estado de lectura como registros persistentes.
+class MensajeDirecto(models.Model):
+    emi_mens = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='dms_enviados')
+    rec_mens = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='dms_recibidos')
+    cont_mens = models.TextField()
+    leid_mens = models.BooleanField(default=False)
+    fech_mens = models.DateTimeField(auto_now_add=True)

@@ -72,6 +72,41 @@ body a { color: #FFFFFF; }
 /* V7: una fila en escritorio, navegación Bootstrap plegable en móvil. */
 .inbox-badge { background: #E61E28; color: #FFFFFF; }
 .view-title { color: #FFFFFF; }
+.participacion-pista { background: #F8E9EA; border-radius: 999px; height: 12px; }
+.participacion-barra { height: 100%; border-radius: 999px; background: #E61E28; }
+.buscador-pildora { border-radius: 999px; }
+.busqueda-resultados { max-height: 240px; overflow-y: auto; color: #1A1A1A; }
+.busqueda-persona { width: 100%; border: 0; border-bottom: 1px solid #eee; padding: .7rem; display: flex; align-items: center; gap: .6rem; text-align: left; background: #FFFFFF; color: #1A1A1A; }
+.busqueda-persona:hover, .busqueda-persona:focus, .busqueda-persona.seleccionada { background: #F8E9EA; }
+.dm-avatar { flex: 0 0 34px; height: 34px; width: 34px; border-radius: 50%; background: #E9A0A2; color: #1A1A1A; display: inline-grid; place-items: center; overflow: hidden; }
+.dm-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.aval-chip { display: inline-flex; align-items: center; gap: .5rem; background: #E9A0A2; color: #1A1A1A; border-radius: 999px; padding: .4rem .8rem; }
+.aval-chip button { border: 0; background: transparent; color: #1A1A1A; font-size: 1.2rem; line-height: 1; }
+.dm-flotante { position: fixed; bottom: 24px; right: 24px; z-index: 1050; background: #E61E28; color: #FFFFFF; border: 2px solid #FFFFFF; border-radius: 50%; width: 60px; height: 60px; box-shadow: 0 4px 20px #1A1A1A40; }
+.dm-flotante .badge { position: absolute; right: -3px; top: -5px; background: #1A1A1A; color: #FFFFFF; }
+.dm-drawer.offcanvas { top: auto; bottom: 94px; right: 24px; height: min(650px, calc(100dvh - 120px)); width: min(850px, calc(100vw - 48px)); border-radius: 20px; background: #FFFFFF; color: #1A1A1A; overflow: hidden; }
+.dm-drawer .offcanvas-header { flex-shrink: 0; }
+.dm-cuerpo { display: flex; flex: 1; min-height: 0; }
+.dm-lateral { width: 35%; overflow-y: auto; border-right: 1px solid #ddd; }
+.dm-lateral > input { width: calc(100% - 1rem); }
+.dm-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dm-hilo-header { padding: .8rem; border-bottom: 1px solid #ddd; flex-shrink: 0; }
+.dm-contacto { display: flex; align-items: center; gap: .6rem; text-decoration: none; color: #1A1A1A; }
+.dm-conversacion { position: relative; display: grid; grid-template-columns: 34px 1fr; column-gap: .6rem; font-size: .875rem; }
+.dm-conversacion .dm-avatar { grid-row: span 3; }
+.dm-extracto { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: #555; }
+.dm-conversacion small { grid-column: 2; color: #666; }
+.dm-conversacion > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-punto { position: absolute; right: 8px; top: 8px; width: 8px; height: 8px; background: #E61E28; border-radius: 50%; }
+.dm-mensajes { flex: 1; overflow-y: auto; padding: 1rem; min-height: 0; }
+.dm-fila { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 1rem; }
+.dm-propio { align-items: flex-end; }
+.dm-burbuja { max-width: 85%; padding: .7rem 1rem; border-radius: 20px; background: #F1F1F1; color: #1A1A1A; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dm-propio .dm-burbuja { background: #E61E28; color: #FFFFFF; }
+.dm-fila small { color: #666; margin-top: .2rem; }
+.dm-enviar { display: flex; align-items: center; gap: .5rem; padding: .7rem; border-top: 1px solid #ddd; }
+#dm-volver { display: none; }
+@media (max-width: 600px) { .dm-drawer.offcanvas { right: 12px; width: calc(100vw - 24px); } .dm-lateral { width: 100%; } .dm-panel { display: none; } .dm-hilo-abierto .dm-lateral { display: none; } .dm-hilo-abierto .dm-panel { display: flex; } #dm-volver { display: inline-block; margin-bottom: .6rem; } }
 /* V8: fondo blanco explícito en toda la cabecera y menú, independiente del body. */
 .header-institucional, .header-institucional .navbar, .header-institucional .navbar-nav, .header-institucional .nav-link { background-color: #FFFFFF !important; color: #1A1A1A; }
 .header-institucional { width: 100%; box-shadow: 0 3px 12px #1A1A1A18; }

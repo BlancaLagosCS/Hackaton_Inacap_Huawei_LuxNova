@@ -2,17 +2,20 @@ from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Case, Count, Exists, IntegerField, OuterRef, Q, Subquery, Value, When
 from django.db.models import Prefetch
 from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.cache import never_cache
 
 from .forms import ComentarioForoForm, EditarPerfilForm, PostularClubForm, PublicacionForoForm, RegistroUsuarioForm, SolicitarEventoForm
-from .models import AvalClub, Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
+from .models import AvalClub, Club, ComentarioForo, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
 from .services import notificar_iniciativa
+from .utils import enviar_notificacion_sistema
+from .participacion import dashboard_participacion, preparar_estadisticas
 
 
 # Recibe una petición y devuelve bienvenida o eventos futuros aprobados por alcance y sede.
@@ -28,6 +31,9 @@ def home(request):
         if busqueda:
             clubes = clubes.filter(Q(nom_club__icontains=busqueda) | Q(desc_club__icontains=busqueda))
         contexto = {'eventos_sede': eventos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(), 'eventos_intersede': eventos.filter(alc_even='INTERSEDE'), 'clubes_activos': clubes}
+        if request.user.rol_usu in ('DAE', 'ADMIN'):
+            for clave in ('eventos_sede', 'eventos_intersede'):
+                contexto[clave] = preparar_estadisticas(request, contexto[clave].prefetch_related('asis_even'))
     return render(request, 'home.html', contexto)
 
 
@@ -46,6 +52,7 @@ def registro(request):
             try:
                 with transaction.atomic():
                     usuario = form.save()
+                    enviar_notificacion_sistema(usuario, '¡Bienvenido a INACAP Smart! Descubre eventos, comparte iniciativas y conecta con tu comunidad.')
             except IntegrityError:
                 form.add_error(None, 'El RUT, correo institucional o nombre de usuario ya está registrado. Revisa tus datos.')
             else:
@@ -67,6 +74,8 @@ def cerrar_sesion(request):
 @require_POST
 @login_required
 def preinscripcion(request, evento_id):
+    if request.user.rol_usu in ('DAE', 'ADMIN'):
+        return HttpResponseForbidden('Tu rol consulta la participación y no se preinscribe en eventos.')
     with transaction.atomic():
         evento = get_object_or_404(Evento.objects.select_for_update().filter(Q(alc_even='INTERSEDE') | Q(alc_even='SEDE', sede_even_id=request.user.sede_usu_id)), pk=evento_id, est_even='APROBADO', fech_even__gte=timezone.now())
         if evento.asis_even.filter(pk=request.user.pk).exists():
@@ -200,11 +209,15 @@ def responder_aval(request, aval_id):
                 destinatarios = Usuario.objects.filter(Q(rol_usu='DAE', sede_usu_id=club.sede_club_id) | Q(pk=club.lid_club_id)).distinct()
                 MensajeInbox.objects.bulk_create([MensajeInbox(dest_inbo=u, tipo_inbo='SISTEMA', club_inbo=club,
                     asun_inbo='Club listo para revisión DAE', cuer_inbo=f'{club.nom_club} completó sus 4 avales y está listo para revisión de la DAE.') for u in destinatarios])
+                for destinatario in destinatarios:
+                    enviar_notificacion_sistema(destinatario, f'{club.nom_club} completó sus 4 avales y está listo para revisión de la DAE.')
+        enviar_notificacion_sistema(request.user, f'Tu aval para {club.nom_club} quedó {decision.lower()}.')
     messages.success(request, 'Tu respuesta al aval fue registrada.')
     return redirect('core:inbox')
 
 
 ROLES_GESTION = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'DAE', 'ADMIN')
+ROLES_EVENTO = ('LIDER_ESTUDIANTIL', 'DELEGADO', 'JEFATURA', 'ADMIN')
 
 
 # Recibe visitante y dueño de un teléfono; devuelve si el visitante es propietario o tiene un rol autorizado.
@@ -239,6 +252,9 @@ def mostrar_perfil(request, perfil_usuario, form=None, negocio=None):
         return respuesta
     asistidos = perfil_usuario.eventos_asistidos.filter(est_even='APROBADO').select_related('sede_even').order_by('-fech_even')
     organizados = Evento.objects.filter(crea_even=perfil_usuario, est_even='APROBADO').select_related('sede_even').order_by('-fech_even')
+    if request.user.rol_usu in ('DAE', 'ADMIN'):
+        asistidos = preparar_estadisticas(request, asistidos.prefetch_related('asis_even'))
+        organizados = preparar_estadisticas(request, organizados.prefetch_related('asis_even'))
     return render(request, 'perfil.html', {'perfil_usuario': perfil_usuario, 'es_propio': request.user.pk == perfil_usuario.pk,
         'puede_ver_telefono': puede_ver_contacto(request.user, perfil_usuario), 'es_gestor': perfil_usuario.rol_usu in ROLES_GESTION,
         'eventos_asistidos': asistidos, 'eventos_organizados': organizados,
@@ -274,9 +290,10 @@ def contexto_gestion(request, negocio=None):
     usuario = request.user
     contexto = {'postulaciones': Club.objects.filter(lid_club=usuario).annotate(aceptados=Count('avales', filter=Q(avales__est_aval='ACEPTADO'))).order_by('-fech_club'),
                 'solicitudes_evento': Evento.objects.filter(crea_even=usuario).order_by('-fech_even')}
+    contexto['dashboard_participacion'] = dashboard_participacion(usuario)
     if usuario.rol_usu == 'ESTUDIANTE':
         contexto['club_form'] = PostularClubForm(user=usuario)
-    if usuario.rol_usu in ROLES_GESTION:
+    if usuario.rol_usu in ROLES_EVENTO:
         contexto['evento_form'] = SolicitarEventoForm()
     if usuario.sede_usu_id and usuario.rol_usu == 'JEFATURA':
         contexto['lideres_sede'] = Usuario.objects.filter(sede_usu_id=usuario.sede_usu_id, rol_usu__in=['LIDER_ESTUDIANTIL', 'DELEGADO']).annotate(total_eventos=Count('evento', filter=Q(evento__est_even='APROBADO'))).order_by('nom_usu')
@@ -288,7 +305,7 @@ def contexto_gestion(request, negocio=None):
             'eventos_aprobados_total': Evento.objects.filter(sede_even_id=sede, est_even='APROBADO').count(),
             'clubes_pendientes': Club.objects.filter(sede_club_id=sede, est_club='PENDIENTE_DAE').select_related('lid_club'),
             'eventos_pendientes': Evento.objects.filter(sede_even_id=sede, est_even='PENDIENTE_DAE').select_related('crea_even').order_by('fech_even'),
-            'usuarios_sede': Usuario.objects.filter(sede_usu_id=sede).order_by('username'),
+            'usuarios_sede': Usuario.objects.filter(sede_usu_id=sede).exclude(username='sistema').order_by('username'),
             'roles_choices': Usuario._meta.get_field('rol_usu').choices,
             'auditoria_sede': RegistroAuditoria.objects.filter(dae_audi__sede_usu_id=sede).select_related('dae_audi').order_by('-fech_audi', '-pk')})
     if negocio:
@@ -330,7 +347,7 @@ def postular_club(request):
 @login_required
 @require_http_methods(['GET', 'POST'])
 def solicitar_evento(request):
-    if request.user.rol_usu not in ROLES_GESTION or not request.user.sede_usu_id:
+    if request.user.rol_usu not in ROLES_EVENTO or not request.user.sede_usu_id:
         return HttpResponseForbidden('Necesitas un rol de gestión y una sede para solicitar eventos.')
     form = SolicitarEventoForm(request.POST if request.method == 'POST' else None, request.FILES or None)
     if request.method == 'POST' and form.is_valid():
@@ -349,6 +366,7 @@ def solicitar_evento(request):
                 evento.save()
                 if directo:
                     RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Creó y aprobó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; inicio {evento.fech_even.isoformat()}; término {evento.ffin_even.isoformat()}')
+                    enviar_notificacion_sistema(request.user, f'Tu evento {evento.tit_even} fue aprobado y publicado.')
                 messages.success(request, 'Evento publicado.' if directo else 'Solicitud de espacio y evento enviada a la DAE.')
                 return redirect('core:perfil')
     return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'evento_form': form})
@@ -424,7 +442,7 @@ def cambiar_rol_usuario(request, usuario_id):
     if rol not in dict(Usuario._meta.get_field('rol_usu').choices):
         return JsonResponse({'error': 'Rol inválido.'}, status=400)
     with transaction.atomic():
-        usuario = get_object_or_404(Usuario.objects.select_for_update(), pk=usuario_id, sede_usu_id=request.user.sede_usu_id)
+        usuario = get_object_or_404(Usuario.objects.select_for_update().exclude(username='sistema'), pk=usuario_id, sede_usu_id=request.user.sede_usu_id)
         anterior = usuario.rol_usu
         if anterior != rol:
             usuario.rol_usu = rol
@@ -432,3 +450,88 @@ def cambiar_rol_usuario(request, usuario_id):
             RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Cambió rol de usuario', det_audi=f'Usuario #{usuario.pk} @{usuario.username}; sede #{usuario.sede_usu_id}; {anterior} -> {rol}')
     messages.success(request, 'Rol actualizado.')
     return redirect('core:perfil')
+
+
+# Recibe un usuario y devuelve solo datos de perfil públicos para buscadores y conversaciones, sin RUT, correo ni teléfono.
+def usuario_json(usuario):
+    return {'id': usuario.pk, 'username': usuario.username, 'nom_usu': usuario.nom_usu,
+            'carr_usu': usuario.carr_usu, 'sede_nombre': usuario.sede_usu.nom_sede if usuario.sede_usu_id else '',
+            'foto_url': usuario.foto_usu.url if usuario.foto_usu else '',
+            'perfil_url': reverse('core:ver_perfil', args=[usuario.pk]), 'oficial': usuario.username == 'sistema'}
+
+
+# Recibe GET autenticado con q/solo_sede; devuelve hasta 20 perfiles activos por nombre o nickname, con filtro estricto para avalistas.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def buscar_usuarios_api(request):
+    consulta = request.GET.get('q', '').strip().lstrip('@')[:100]
+    usuarios = Usuario.objects.filter(is_active=True).exclude(username__iexact='sistema').exclude(pk=request.user.pk)
+    if request.GET.get('solo_sede') == '1':
+        usuarios = usuarios.filter(sede_usu_id=request.user.sede_usu_id, rol_usu='ESTUDIANTE') if request.user.sede_usu_id else usuarios.none()
+    if consulta:
+        usuarios = usuarios.filter(Q(nom_usu__icontains=consulta) | Q(username__icontains=consulta))
+    else:
+        usuarios = usuarios.none()
+    return JsonResponse({'usuarios': [usuario_json(u) for u in usuarios.select_related('sede_usu').order_by('nom_usu', 'username')[:20]]})
+
+
+# Recibe GET autenticado; devuelve conversaciones ordenadas por último mensaje, cuenta oficial fija y total propio no leído.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def dm_conversaciones(request):
+    ultimo = MensajeDirecto.objects.filter(Q(emi_mens=request.user, rec_mens_id=OuterRef('pk')) | Q(rec_mens=request.user, emi_mens_id=OuterRef('pk'))).order_by('-fech_mens', '-pk')
+    usuarios = Usuario.objects.filter(Q(dms_enviados__rec_mens=request.user) | Q(dms_recibidos__emi_mens=request.user) | Q(username='sistema')).exclude(pk=request.user.pk).distinct()
+    usuarios = usuarios.annotate(ultimo_texto=Subquery(ultimo.values('cont_mens')[:1]), ultimo_fecha=Subquery(ultimo.values('fech_mens')[:1]),
+        oficial_orden=Case(When(username='sistema', then=Value(0)), default=Value(1), output_field=IntegerField())).select_related('sede_usu').order_by('oficial_orden', '-ultimo_fecha', 'pk')[:100]
+    no_leidos = MensajeDirecto.objects.filter(rec_mens=request.user, leid_mens=False)
+    conteos = {fila['emi_mens_id']: fila['total'] for fila in no_leidos.values('emi_mens_id').annotate(total=Count('pk'))}
+    return JsonResponse({'no_leidos': no_leidos.count(), 'conversaciones': [{**usuario_json(u), 'extracto': (u.ultimo_texto or 'Canal oficial de notificaciones')[:100], 'fecha': u.ultimo_fecha.isoformat() if u.ultimo_fecha else None, 'no_leidos': conteos.get(u.pk, 0)} for u in usuarios]})
+
+
+# Recibe GET autenticado e ID de interlocutor; devuelve solo los últimos 100 mensajes entre ese usuario y el solicitante.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def dm_hilo(request, usuario_id):
+    interlocutor = get_object_or_404(Usuario.objects.select_related('sede_usu').exclude(pk=request.user.pk), pk=usuario_id)
+    mensajes = MensajeDirecto.objects.filter(Q(emi_mens=request.user, rec_mens=interlocutor) | Q(emi_mens=interlocutor, rec_mens=request.user)).order_by('-pk')[:100]
+    return JsonResponse({'usuario': usuario_json(interlocutor), 'mensajes': [{'id': m.pk, 'propio': m.emi_mens_id == request.user.pk, 'contenido': m.cont_mens, 'leido': m.leid_mens, 'fecha': m.fech_mens.isoformat()} for m in reversed(list(mensajes))]})
+
+
+# Recibe usuario actual, interlocutor y corte opcional; marca únicamente mensajes recibidos de ese hilo y devuelve cantidad actualizada.
+def leer_recibidos(usuario, interlocutor, hasta_id=None):
+    mensajes = MensajeDirecto.objects.filter(emi_mens=interlocutor, rec_mens=usuario, leid_mens=False)
+    if hasta_id is not None:
+        mensajes = mensajes.filter(pk__lte=hasta_id)
+    return mensajes.update(leid_mens=True)
+
+
+# Recibe POST autenticado con corte opcional; marca lectura del hilo propio, exige CSRF y devuelve el total marcado.
+@login_required
+@never_cache
+@require_POST
+def dm_leer(request, usuario_id):
+    interlocutor = get_object_or_404(Usuario.objects.exclude(pk=request.user.pk), pk=usuario_id)
+    corte = request.POST.get('hasta_id')
+    if corte and not corte.isdigit():
+        return JsonResponse({'error': 'Corte de lectura inválido.'}, status=400)
+    return JsonResponse({'marcados': leer_recibidos(request.user, interlocutor, int(corte) if corte else None)})
+
+
+# Recibe POST autenticado con texto; envía un DM al destinatario activo, marca recibidos y bloquea respuestas o suplantación de sistema.
+@login_required
+@never_cache
+@require_POST
+def dm_enviar(request, usuario_id):
+    interlocutor = get_object_or_404(Usuario.objects.filter(is_active=True).exclude(pk=request.user.pk), pk=usuario_id)
+    if interlocutor.username == 'sistema' or request.user.username == 'sistema':
+        return JsonResponse({'error': 'Canal oficial de notificaciones automáticas del sistema (no admite respuestas)'}, status=403)
+    texto = request.POST.get('cont_mens', '').strip()
+    if not texto or len(texto) > 5000:
+        return JsonResponse({'error': 'Escribe un mensaje de 1 a 5000 caracteres.'}, status=400)
+    with transaction.atomic():
+        mensaje = MensajeDirecto.objects.create(emi_mens=request.user, rec_mens=interlocutor, cont_mens=texto)
+        leer_recibidos(request.user, interlocutor)
+    return JsonResponse({'id': mensaje.pk}, status=201)

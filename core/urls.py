@@ -6,6 +6,11 @@ from .forms import LoginForm
 
 app_name = 'core'
 urlpatterns = [
+    path('api/buscar-usuarios/', views.buscar_usuarios_api, name='buscar_usuarios_api'),
+    path('api/dm/conversaciones/', views.dm_conversaciones, name='dm_conversaciones'),
+    path('api/dm/<int:usuario_id>/', views.dm_hilo, name='dm_hilo'),
+    path('api/dm/<int:usuario_id>/enviar/', views.dm_enviar, name='dm_enviar'),
+    path('api/dm/<int:usuario_id>/leer/', views.dm_leer, name='dm_leer'),
     path('', views.home, name='home'),
     path('registro/', views.registro, name='registro'),
     path('login/', LoginView.as_view(template_name='login.html', authentication_form=LoginForm, redirect_authenticated_user=True), name='login'),

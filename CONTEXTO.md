@@ -83,6 +83,7 @@ Hackaton_Inacap_Huawei_LuxNova/
 7. ComentarioForo: publ_come (FK PublicacionForo), aut_come (FK Usuario), cont_come, fech_come.
 8. MensajeInbox: dest_inbo (FK Usuario), remi_inbo (FK Usuario nullable; None = Sistema Oficial INACAP), tipo_inbo (SISTEMA, SOLICITUD_AVAL, INICIATIVA_BUZON), asun_inbo, cuer_inbo, club_inbo (FK Club nullable), publ_inbo (FK PublicacionForo nullable), leid_inbo, fech_inbo.
 9. RegistroAuditoria: dae_audi (FK Usuario), acc_audi, det_audi, fech_audi.
+10. MensajeDirecto: emi_mens (FK Usuario, dms_enviados), rec_mens (FK Usuario, dms_recibidos), cont_mens, leid_mens (default False), fech_mens (auto_now_add). Conversaciones privadas por pareja de participantes.
 Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo este orden. No implementar funcionalidades de versiones futuras antes de cerrar, probar (manage.py check) y documentar la versión actual en CONTEXTO_VERSIONES.md.
 - v1 — Base de Datos Relacional y Arquitectura MVT [COMPLETADA]:
   - Alcance: Creación de app única core/, configuración PostgreSQL (hackaton_luxnova), migración de las 9 tablas relacionales con nomenclatura [campo]_[tabla], core/admin.py y .gitignore.
@@ -100,6 +101,8 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
   - Alcance: Navbar blanco en una fila, menú móvil plegable, título en main, Galeria como MEDIA_ROOT y guías de dimensiones con validación de tamaño/formato de imágenes.
 - v8 — Header/Nav blanco lineal e intervalos reales de eventos [COMPLETADA]:
   - Alcance: Header y nav blancos con respaldo inline, logo compacto de 46px, menú expand-lg, ffin_even y validación de inicio/término, disponibilidad por intersección real y rangos visibles en Home/Perfil/panel DAE.
+- v9 — DM, buscadores y dashboards de participación [COMPLETADA]:
+  - Alcance: Drawer DM privado con Visto y canal @sistema, búsqueda común por nombre/nickname y avalistas con chips, DAE solo aprueba, gráficos de participación y RUTs enmascarados por rol/sede.
 
 ## 5. Registro y catálogo oficial de carreras (v4)
 
@@ -136,7 +139,7 @@ La demo agrega un club de est1 y solicita aval a est2–est5; repetir la carga n
 
 La v6 completa los flujos pendientes de las versiones anteriores. Desde Mi cuenta, ESTUDIANTE postula clubes con exactamente cuatro compañeros activos ESTUDIANTE de su sede; se crean avales y solicitudes en Inbox dentro de una transacción. El perfil muestra estados y contador de avales. Tras cuatro aceptaciones, DAE/ADMIN resuelven el club desde el panel local; aprobar promueve a LIDER_ESTUDIANTIL únicamente si el creador era ESTUDIANTE. Cada resolución notifica y se registra en RegistroAuditoria; reenviar una resolución terminal no duplica efectos.
 
-Líderes, Delegados, Jefatura, DAE y ADMIN solicitan eventos con banner opcional y fecha futura local. Los espacios del selector son Auditorio Principal, Sala Multiuso 101, Laboratorio Computación 3, Patio Central / Ágora y Cancha Deportiva. La sede y creador se asignan en servidor. Gestores normales quedan PENDIENTE_DAE; DAE/ADMIN crean directamente APROBADO solo si está libre, dejando auditoría.
+Desde v9, solo Líderes, Delegados, Jefatura y ADMIN solicitan eventos con banner opcional e intervalo futuro. DAE tiene gestión/aprobación, sin formulario ni acceso a crear eventos. Los espacios del selector son Auditorio Principal, Sala Multiuso 101, Laboratorio Computación 3, Patio Central / Ágora y Cancha Deportiva. La sede y creador se asignan en servidor. Gestores normales quedan PENDIENTE_DAE; ADMIN crea directamente APROBADO solo si está libre, dejando auditoría. DAE/ADMIN resuelven solicitudes locales ya enviadas por los organizadores.
 
 Disponibilidad vigente desde v8: comparar eventos APROBADO de la misma sede y espacio sin distinguir mayúsculas con `otro.fech_even < evento.ffin_even` y `otro.ffin_even > evento.fech_even`. Los intervalos contiguos (término == siguiente inicio) no chocan. Se conserva bloqueo de Sede dentro de una transacción en creación directa y aprobación para evitar carreras concurrentes. Las solicitudes sin término o con término <= inicio no se aprueban. Las reservas aprobadas históricas sin término se tratan conservadoramente como abiertas desde su inicio hasta corregir el dato. No usar ORM/admin Django para eludir el control de aplicación.
 
@@ -167,3 +170,19 @@ La migración 0003 agrega ffin_even DateTimeField(null=True, blank=True) sin bor
 El comando demo asigna a sus dos eventos intervalos explícitos de dos horas, conserva los inicios existentes y completa términos ausentes/inválidos. No asigna término a eventos ajenos a la demo. Si una reserva aprobada histórica no tiene término, hay que completarlo desde administración antes de liberar automáticamente su espacio para nuevas reservas; no se inventa un fin de dos horas para datos reales.
 
 V8 queda con commit local y documentación actualizada. El push continúa bloqueado por la revisión automática que rechazó las contraseñas del historial v6; no se ha resuelto ni se ha intentado eludir esa restricción.
+
+## 10. Mensajería y participación (v9 vigente)
+
+Cuenta oficial @sistema: nom_usu LuxNova Sistema, corr_usu sistema@inacap.cl, RUT reservado 00000000-0, rol ADMIN, activa, sin sede ni flags Django y con contraseña inutilizable. Es una excepción técnica al RUT de registro; no es una cuenta humana. post_migrate y cargar_datos_demo garantizan su existencia. No aparece en búsqueda ni selección de avales; el registro reserva su nickname en cualquier combinación de mayúsculas. No puede enviar mensajes humanos ni recibir respuestas de usuarios.
+
+`enviar_notificacion_sistema(usuario_destino, texto_mensaje)` crea un MensajeDirecto oficial. Registro da bienvenida; avisos nuevos de Inbox se reflejan mediante post_save (sin duplicar al cambiar leído). Los avisos creados con bulk_create se conectan explícitamente en los flujos de cuarto aval e iniciativas. Cambios de aval, resolución de club/evento y publicación directa ADMIN generan DM. El contacto de iniciativas queda en el Inbox protegido por rol: el DM solo anuncia que hay una iniciativa. No se migran retroactivamente avisos antiguos a DM.
+
+APIs autenticadas sin caché: `/api/buscar-usuarios/?q=...&solo_sede=0|1`, `/api/dm/conversaciones/`, `/api/dm/<id>/`, `/api/dm/<id>/enviar/` y `/api/dm/<id>/leer/`. Búsqueda por nombre O username (quita @ inicial), activos, excluye cuenta propia y sistema; solo_sede=1 restringe a estudiantes de la misma sede. Respuesta pública sin RUT/correo/teléfono. Devolver máximo 20 resultados, 100 conversaciones y 100 últimos mensajes por hilo para acotar el piloto; no hay paginación de historial antiguo en esta versión.
+
+Hilos y lectura siempre se consultan desde el usuario autenticado, nunca desde un ID de emisor proporcionado por cliente. Enviar/leer requiere POST y CSRF. Enviar admite 1–5000 caracteres y marca recibidos del hilo como leídos; abrirlo hace fetch GET seguido de POST de lectura hasta el último mensaje recibido observado. La interfaz muestra Visto debajo del último envío leído. GET no modifica lectura. Historial y contador se actualizan por polling cada 5 segundos con página visible, sin WebSockets. @sistema está fijado primero, verificado y con input bloqueado.
+
+UI: acceso Buscar personas en el navbar abre buscador compacto por nombre/@nickname. El drawer usa el mismo endpoint. La postulación añade hasta cuatro chips removibles e IDs ocultos; el servidor conserva su validación de cuatro pares autorizados. Sin JS sigue disponible el select original; no permite eludir controles de sede/rol. Bootstrap maneja offcanvas/modal y CSS mantiene la paleta; no se añadió framework ni librería de gráficos.
+
+DAE/ADMIN no se preinscriben (botón oculto y POST rechazado). Sus tarjetas de eventos locales muestran gráficos CSS de inscritos por carrera y **distribución por año de ingreso**. La relación M2M no conserva fecha de inscripción: no se inventan fechas ni se presenta el gráfico como historial de altas. Consultar RUTs muestra nombre/carrera y solo cuerpo del RUT con últimos cuatro dígitos ocultos y sin DV. No se muestran estadísticas identificables de sedes ajenas, aunque el evento sea intersede.
+
+Dashboard propio: DAE/ADMIN ve participaciones por carrera en eventos aprobados de su sede; Jefatura ve participaciones por evento solo de su carrera y los Líderes/Delegados locales. Participación significa relación de preinscripción, no asistencia efectiva, y una persona en varios eventos cuenta varias participaciones. El panel DAE distingue solicitudes de clubes y de eventos/reservas; DAE no crea eventos. El rol ADMIN conserva esa facultad. El bloqueo de publicación del historial con contraseñas sigue pendiente y no se elude desde v9.

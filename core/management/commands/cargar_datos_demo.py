@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from core.models import AvalClub, CARRERAS_CHOICES, Club, Evento, MensajeInbox, PublicacionForo, Sede, Usuario
 from core.services import notificar_iniciativa
+from core.utils import asegurar_usuario_sistema
 
 
 # Define la carga demo; recibe opciones de manage.py y produce sedes, usuarios y eventos reutilizables.
@@ -15,6 +16,7 @@ class Command(BaseCommand):
     # Recibe argumentos de consola; crea datos sin duplicar ni sobrescribir cuentas existentes y devuelve un resumen.
     @transaction.atomic
     def handle(self, *args, **options):
+        asegurar_usuario_sistema()
         sedes = []
         for nombre, direccion in [('INACAP Rancagua', 'Sede Rancagua'), ('INACAP Santiago Centro', 'Sede Santiago Centro'), ('INACAP Maipú', 'Sede Maipú')]:
             sede, _ = Sede.objects.get_or_create(nom_sede=nombre, defaults={'dir_sede': direccion})

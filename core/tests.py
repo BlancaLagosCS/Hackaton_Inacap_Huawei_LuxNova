@@ -6,7 +6,138 @@ from django import forms
 from django.db import IntegrityError
 from unittest.mock import patch
 from .forms import validar_rut_chileno
-from .models import AvalClub, Club, Evento, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
+from .models import AvalClub, Club, Evento, MensajeDirecto, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
+
+
+# Recibe una BD aislada y prueba búsqueda, DMs privados, canal oficial y dashboards segmentados de v9.
+class MensajeriaV9Tests(TestCase):
+    # Prepara participantes ficticios de dos carreras y sedes, más gestores; no recibe datos externos ni devuelve valor.
+    def setUp(self):
+        self.sede = Sede.objects.create(nom_sede='Sede DM A', dir_sede='Demo')
+        self.otra = Sede.objects.create(nom_sede='Sede DM B', dir_sede='Demo')
+        self.alicia = self.usuario('luz_nova', 'Alicia Ficticia', carrera='Ing. Informática (4 años)')
+        self.beto = self.usuario('betito', 'Roberto Ficticio', carrera='Técnico Mecánica')
+        self.tercero = self.usuario('tercero', 'Otra Persona', sede=self.otra)
+        self.dae = self.usuario('gestor', 'DAE Ficticio', rol='DAE')
+        self.jefe = self.usuario('jefatura', 'Jefatura Ficticia', rol='JEFATURA', carrera=self.alicia.carr_usu)
+        self.client.force_login(self.alicia)
+
+    # Recibe datos de prueba y devuelve una cuenta sintética con identificador único y año de ingreso para gráficos temporales.
+    def usuario(self, nickname, nombre, rol='ESTUDIANTE', carrera='Ing. Informática (4 años)', sede=None):
+        return Usuario.objects.create_user(username=nickname, nom_usu=nombre, rut_usu=f'DEMO-{nickname}', corr_usu=f'{nickname}@inacapmail.cl', rol_usu=rol, sede_usu=sede or self.sede, carr_usu=carrera, anio_usu=2025)
+
+    # Recibe búsquedas por nombre y nickname; comprueba privacidad, exclusiones y selección de avalistas solo de la sede.
+    def test_busqueda_unificada(self):
+        for consulta in ['Roberto', '@betito']:
+            usuarios = self.client.get('/api/buscar-usuarios/', {'q': consulta}).json()['usuarios']
+            self.assertEqual([u['id'] for u in usuarios], [self.beto.pk])
+            self.assertNotIn('rut_usu', usuarios[0])
+            self.assertNotIn('tel_usu', usuarios[0])
+            self.assertTrue(usuarios[0]['perfil_url'].endswith(f'/{self.beto.pk}/'))
+        self.assertEqual(self.client.get('/api/buscar-usuarios/?q=@sistema').json()['usuarios'], [])
+        self.assertEqual(self.client.get('/api/buscar-usuarios/?q=luz_nova').json()['usuarios'], [])
+        self.assertEqual(self.client.get('/api/buscar-usuarios/?q=tercero&solo_sede=1').json()['usuarios'], [])
+        self.assertEqual(self.client.get('/api/buscar-usuarios/?q=gestor&solo_sede=1').json()['usuarios'], [])
+        self.beto.is_active = False
+        self.beto.save()
+        self.assertEqual(self.client.get('/api/buscar-usuarios/?q=betito').json()['usuarios'], [])
+
+    # Recibe POST de dos participantes; verifica CSRF, autor impuesto, lectura por POST y ausencia de mensajes ajenos en otro hilo.
+    def test_dm_csrf_lectura_y_privacidad(self):
+        cliente = Client(enforce_csrf_checks=True)
+        cliente.force_login(self.alicia)
+        enviar = reverse('core:dm_enviar', args=[self.beto.pk])
+        self.assertEqual(cliente.post(enviar, {'cont_mens': 'Hola ficticio'}).status_code, 403)
+        cliente.get('/')
+        token = cliente.cookies['csrftoken'].value
+        respuesta = cliente.post(enviar, {'cont_mens': 'Hola ficticio', 'emi_mens': self.tercero.pk}, HTTP_X_CSRFTOKEN=token)
+        self.assertEqual(respuesta.status_code, 201)
+        mensaje = MensajeDirecto.objects.get(pk=respuesta.json()['id'])
+        self.assertEqual(mensaje.emi_mens, self.alicia)
+        self.assertFalse(mensaje.leid_mens)
+        self.client.force_login(self.beto)
+        hilo = reverse('core:dm_hilo', args=[self.alicia.pk])
+        self.assertEqual(self.client.get(hilo).json()['mensajes'][0]['contenido'], 'Hola ficticio')
+        mensaje.refresh_from_db()
+        self.assertFalse(mensaje.leid_mens)
+        self.client.post(reverse('core:dm_leer', args=[self.alicia.pk]), {'hasta_id': mensaje.pk})
+        mensaje.refresh_from_db()
+        self.assertTrue(mensaje.leid_mens)
+        self.client.force_login(self.tercero)
+        self.assertEqual(self.client.get(hilo).json()['mensajes'], [])
+        self.client.post(reverse('core:dm_leer', args=[self.alicia.pk]))
+        self.assertEqual(MensajeDirecto.objects.filter(emi_mens=self.alicia, rec_mens=self.beto).count(), 1)
+
+    # Recibe un hilo con recibidos y salientes; comprueba contador, orden oficial fijo y marcado automático al enviar.
+    def test_lectura_al_enviar_y_conversaciones(self):
+        mensaje = MensajeDirecto.objects.create(emi_mens=self.beto, rec_mens=self.alicia, cont_mens='Recibido')
+        datos = self.client.get('/api/dm/conversaciones/').json()
+        self.assertEqual(datos['no_leidos'], 1)
+        self.assertEqual(datos['conversaciones'][0]['username'], 'sistema')
+        self.client.post(reverse('core:dm_enviar', args=[self.beto.pk]), {'cont_mens': 'Respuesta'})
+        mensaje.refresh_from_db()
+        self.assertTrue(mensaje.leid_mens)
+        self.assertEqual(self.client.get('/api/dm/conversaciones/').json()['no_leidos'], 0)
+        self.assertEqual(self.client.get(reverse('core:dm_enviar', args=[self.beto.pk])).status_code, 405)
+        self.assertEqual(self.client.post(reverse('core:dm_enviar', args=[self.beto.pk]), {'cont_mens': '  '}).status_code, 400)
+
+    # Recibe una notificación oficial y una respuesta humana; verifica identidad, contraseña inutilizable y bloqueo de respuesta.
+    def test_sistema_y_notificaciones(self):
+        from .utils import asegurar_usuario_sistema, enviar_notificacion_sistema
+        sistema = asegurar_usuario_sistema()
+        self.assertEqual(sistema.nom_usu, 'LuxNova Sistema')
+        self.assertFalse(sistema.has_usable_password())
+        self.assertFalse(sistema.is_staff or sistema.is_superuser)
+        mensaje = enviar_notificacion_sistema(self.alicia, 'Notificación ficticia')
+        self.assertEqual(mensaje.emi_mens, sistema)
+        self.assertEqual(self.client.post(reverse('core:dm_enviar', args=[sistema.pk]), {'cont_mens': 'No permitido'}).status_code, 403)
+        aviso = MensajeInbox.objects.create(dest_inbo=self.alicia, tipo_inbo='SISTEMA', asun_inbo='Club aprobado', cuer_inbo='Aviso de prueba')
+        self.assertTrue(MensajeDirecto.objects.filter(rec_mens=self.alicia, emi_mens=sistema, cont_mens__contains=aviso.asun_inbo).exists())
+        total = MensajeDirecto.objects.count()
+        aviso.leid_inbo = True
+        aviso.save()
+        self.assertEqual(MensajeDirecto.objects.count(), total)
+
+    # Recibe un alta válida por la vista; verifica que bienvenida y sesión queden conectadas con el canal oficial.
+    def test_bienvenida_registro(self):
+        self.client.logout()
+        datos = {'username': 'nuevo_v9', 'nom_usu': 'Persona Ficticia', 'rut_usu': '88888888-8', 'corr_usu': 'nuevo_v9@inacapmail.cl', 'tel_usu': '000000000', 'sede_usu': self.sede.pk, 'carr_usu': 'Ing. Informática (4 años)', 'anio_usu': 2025, 'password1': 'ClaveFicticia-894!', 'password2': 'ClaveFicticia-894!'}
+        self.assertRedirects(self.client.post('/registro/', datos), '/')
+        usuario = Usuario.objects.get(username='nuevo_v9')
+        self.assertTrue(MensajeDirecto.objects.filter(rec_mens=usuario, emi_mens__username='sistema', cont_mens__contains='Bienvenido').exists())
+
+    # Recibe RUTs sintéticos con DV y formato variable; verifica ocultamiento de cuatro dígitos del cuerpo y ausencia de DV.
+    def test_rut_enmascarado(self):
+        from .templatetags.privacidad import enmascarar_rut
+        self.assertEqual(enmascarar_rut('12.345.678-9'), '1234****')
+        self.assertEqual(enmascarar_rut('12345678-K'), '1234****')
+        self.assertEqual(enmascarar_rut('123-4'), '***')
+        self.assertEqual(enmascarar_rut(None), '****')
+
+    # Recibe un evento con dos carreras; verifica gráficos y RUTs enmascarados para DAE, sin botón ni endpoint de preinscripción.
+    def test_dae_dashboard_y_evento(self):
+        self.alicia.rut_usu = '12345678-5'
+        self.alicia.save()
+        evento = Evento.objects.create(tit_even='Evento dashboard', desc_even='Demo', cat_even='TODO_PUBLICO', esp_even='Patio', sede_even=self.sede, crea_even=self.dae, est_even='APROBADO', fech_even=timezone.now() + timedelta(days=3), ffin_even=timezone.now() + timedelta(days=3, hours=2))
+        evento.asis_even.add(self.alicia, self.beto)
+        self.client.force_login(self.dae)
+        perfil = self.client.get('/perfil/')
+        self.assertNotContains(perfil, 'Solicitar Reserva de Espacio / Crear Evento')
+        self.assertEqual(self.client.post('/evento/solicitar/', {}).status_code, 403)
+        self.assertEqual(self.client.post(reverse('core:preinscripcion', args=[evento.pk])).status_code, 403)
+        home = self.client.get('/')
+        self.assertContains(home, 'Consultar RUTs')
+        self.assertContains(home, '1234****')
+        self.assertNotContains(home, self.alicia.rut_usu)
+        self.assertNotContains(home, 'Pre-inscribirme')
+        self.assertContains(home, 'Distribución temporal por año de ingreso')
+        filas = perfil.context['dashboard_participacion']['barras']
+        self.assertEqual(sum(f['total'] for f in filas), 2)
+        self.client.force_login(self.jefe)
+        filas = self.client.get('/perfil/').context['dashboard_participacion']['barras']
+        self.assertEqual(sum(f['total'] for f in filas), 1)
+        self.client.force_login(self.alicia)
+        self.assertNotContains(self.client.get('/'), 'Consultar RUTs')
 
 
 # Usa conexiones PostgreSQL independientes; recibe una base transaccional y verifica dos aprobaciones simultáneas en el mismo espacio.
@@ -90,6 +221,7 @@ class IntervalosV8Tests(TestCase):
         pendiente.refresh_from_db()
         self.assertEqual(pendiente.est_even, 'PENDIENTE_DAE')
         self.assertFalse(RegistroAuditoria.objects.exists())
+        Usuario.objects.filter(pk=self.dae.pk).update(rol_usu='ADMIN')
         self.assertContains(self.client.post('/evento/solicitar/', self.datos(4, 5)), 'Conflicto de espacio:')
         self.assertEqual(Evento.objects.count(), 2)
         self.assertRedirects(self.client.post('/evento/solicitar/', self.datos(6, 7)), '/perfil/')
@@ -308,7 +440,7 @@ class PerfilesV4Tests(TestCase):
         self.assertContains(respuesta, 'Este correo institucional ya está registrado.')
         respuesta = self.client.post('/registro/', self.datos_registro(carr_usu='Carrera inexistente'))
         self.assertIn('carr_usu', respuesta.context['form'].errors)
-        self.assertEqual(Usuario.objects.count(), 3)
+        self.assertEqual(Usuario.objects.exclude(username='sistema').count(), 3)
         self.assertRedirects(self.client.post('/registro/', self.datos_registro(rut_usu='44.444.444-4')), '/')
         self.assertEqual(Usuario.objects.get(username='nuevo').rut_usu, '44444444-4')
 
@@ -537,6 +669,7 @@ class CierreV6Tests(TestCase):
         self.client.post(url)
         self.assertEqual(RegistroAuditoria.objects.count(), 1)
         datos = self.datos_evento(fech_even=timezone.localtime(base).strftime('%Y-%m-%dT%H:%M'), ffin_even=timezone.localtime(base + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M'))
+        Usuario.objects.filter(pk=self.dae.pk).update(rol_usu='ADMIN')
         self.assertContains(self.client.post('/evento/solicitar/', datos), 'Conflicto de espacio:')
         self.assertEqual(Evento.objects.count(), 2)
         self.assertRedirects(self.client.post('/evento/solicitar/', {**datos, 'esp_even': 'Sala Multiuso 101'}), '/perfil/')

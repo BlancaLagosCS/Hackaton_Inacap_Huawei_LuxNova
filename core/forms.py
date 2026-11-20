@@ -74,6 +74,13 @@ class RegistroForm(UserCreationForm):
             raise forms.ValidationError('Este correo institucional ya está registrado.')
         return correo
 
+    # Recibe el nombre de cuenta; reserva sistema sin distinguir mayúsculas y devuelve un identificador permitido.
+    def clean_username(self):
+        username = super().clean_username()
+        if username.lower() == 'sistema':
+            raise forms.ValidationError('Este nombre está reservado para el canal oficial.')
+        return username
+
     # Recibe el RUT enviado; devuelve su forma validada y normalizada o un error claro de duplicación.
     def clean_rut_usu(self):
         rut = validar_rut_chileno(self.cleaned_data['rut_usu'])
@@ -178,7 +185,7 @@ class SelectorAvalistas(forms.ModelMultipleChoiceField):
 
 # Recibe datos de club y usuario actual; valida exactamente cuatro estudiantes de su sede y devuelve una postulación sin guardar.
 class PostularClubForm(forms.ModelForm):
-    avales = SelectorAvalistas(queryset=Usuario.objects.none(), required=False, label='Selecciona exactamente 4 compañeros', widget=forms.SelectMultiple(attrs={'class': 'form-select', 'size': 6}))
+    avales = SelectorAvalistas(queryset=Usuario.objects.none(), required=False, label='Selecciona exactamente 4 compañeros', widget=forms.SelectMultiple(attrs={'class': 'form-select', 'size': 6, 'data-avales-picker': 'true'}))
 
     # Recibe metadatos y define los campos editables del club, sin sede, líder ni estado manipulables.
     class Meta:

@@ -1,4 +1,5 @@
 from .models import MensajeInbox, Usuario
+from .utils import enviar_notificacion_sistema
 
 
 # Recibe una publicación INICIATIVA guardada; crea avisos privados para líderes/DAE de su sede y devuelve el total enviado.
@@ -14,4 +15,6 @@ def notificar_iniciativa(publicacion):
                              asun_inbo=f"Nueva Iniciativa: {publicacion.tit_publ or 'Sin título'}"[:255],
                              cuer_inbo=cuerpo, publ_inbo=publicacion) for destinatario in destinatarios]
     MensajeInbox.objects.bulk_create(mensajes)
+    for mensaje in mensajes:
+        enviar_notificacion_sistema(mensaje.dest_inbo, 'Recibiste una iniciativa en tu Buzón de sugerencias.')
     return len(mensajes)
