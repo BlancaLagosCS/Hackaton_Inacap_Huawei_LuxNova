@@ -12,6 +12,8 @@ urlpatterns = [
     path('logout/', views.cerrar_sesion, name='logout'),
     path('eventos/<int:evento_id>/preinscripcion/', views.preinscripcion, name='preinscripcion'),
     path('ahora-mismo/', views.ahora_mismo, name='ahora_mismo'),
+    path('foro/', views.foro_ahora_mismo, name='foro'),
+    path('foro/<int:publ_id>/comentar/', views.comentar_publicacion, name='comentar_publicacion'),
     path('inbox/', views.inbox, name='inbox'),
     path('perfil/', views.perfil, name='perfil'),
 ]

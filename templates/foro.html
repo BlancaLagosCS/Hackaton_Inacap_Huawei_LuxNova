@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Ahora Mismo · INACAP Smart{% endblock %}
+{% block content %}
+<section class="hero mb-4"><span class="eyebrow">LA VIDA DE TU SEDE</span><h1 class="display-5 fw-bold mt-3">Ahora Mismo</h1><p class="lead mb-0">Comparte lo que pasa en {{ user.sede_usu.nom_sede|default:'tu comunidad' }}.</p></section>
+{% if user.sede_usu_id %}
+<div class="row g-4 justify-content-center"><div class="col-lg-8">
+<section class="card border-0 shadow-sm p-4 mb-4" aria-labelledby="crear-publicacion"><h2 id="crear-publicacion" class="h4">Tu comunidad tiene algo que contar</h2><p class="text-secondary">Con #Iniciativa, tu propuesta y tus datos de contacto se envían de forma privada a los Líderes y DAE de tu sede.</p>
+<form method="post" action="{% url 'core:foro' %}" enctype="multipart/form-data">{% csrf_token %}{% include 'partials/formulario.html' %}<img id="vista-previa-foro" class="img-fluid rounded mb-3" alt="Vista previa de la foto seleccionada" hidden><button class="btn btn-primary">Publicar en mi sede</button></form></section>
+<nav class="d-flex flex-wrap gap-2 mb-4" aria-label="Filtrar publicaciones">
+<a class="btn {% if not etiqueta %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}">Todas</a>
+<a class="btn {% if etiqueta == 'AHORA_MISMO' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=AHORA_MISMO">#AhoraMismo</a>
+<a class="btn {% if etiqueta == 'NOTICIA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=NOTICIA">#Noticia</a>
+<a class="btn {% if etiqueta == 'INICIATIVA' %}btn-primary{% else %}btn-outline-dark{% endif %}" href="{% url 'core:foro' %}?etiqueta=INICIATIVA">#Iniciativa</a></nav>
+<section aria-label="Publicaciones de tu sede">
+{% for publicacion in publicaciones %}
+<article id="publicacion-{{ publicacion.pk }}" class="card event-card event-reveal mb-4">
+<div class="card-body p-4"><header class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><strong>{{ publicacion.aut_publ.nom_usu|default:publicacion.aut_publ.username }}</strong><span class="badge category-badge ms-2">{{ publicacion.aut_publ.get_rol_usu_display }}</span><div class="text-secondary small mt-1">{{ publicacion.aut_publ.carr_usu }} · <time datetime="{{ publicacion.fech_publ|date:'c' }}">{{ publicacion.fech_publ|date:'d M Y · H:i' }}</time></div></div><span class="badge text-bg-danger align-self-start">{% if publicacion.etiq_publ == 'AHORA_MISMO' %}#AhoraMismo{% elif publicacion.etiq_publ == 'NOTICIA' %}#Noticia{% else %}#Iniciativa{% endif %}</span></header>
+{% if publicacion.tit_publ %}<h2 class="h4">{{ publicacion.tit_publ }}</h2>{% endif %}
+{% if publicacion.img_publ %}<img class="img-fluid rounded mb-3" src="{{ publicacion.img_publ.url }}" alt="Foto de la publicación {{ publicacion.tit_publ }}" loading="lazy">{% endif %}
+<p class="text-break">{{ publicacion.cont_publ|linebreaksbr }}</p>
+<section class="border-top pt-3 mt-3" aria-label="Comentarios"><h3 class="h6">Comentarios</h3>
+{% for comentario in publicacion.comentarios.all %}<div class="bg-light rounded p-3 mb-2"><strong>{{ comentario.aut_come.nom_usu|default:comentario.aut_come.username }}</strong><small class="text-secondary ms-2">{{ comentario.fech_come|date:'d M Y H:i' }}</small><p class="mb-0 mt-1 text-break">{{ comentario.cont_come|linebreaksbr }}</p></div>{% empty %}<p class="text-secondary small">Sé el primero en comentar.</p>{% endfor %}
+<form method="post" action="{% url 'core:comentar_publicacion' publicacion.pk %}" class="mt-3">{% csrf_token %}
+<label class="form-label" for="comentario-{{ publicacion.pk }}">Tu comentario</label><textarea id="comentario-{{ publicacion.pk }}" name="cont_come" class="form-control mb-2" rows="2" required placeholder="Suma tu comentario…">{% if publicacion_error == publicacion.pk %}{{ comentario_form.cont_come.value|default:'' }}{% endif %}</textarea>
+{% if publicacion_error == publicacion.pk %}<div class="text-danger small" role="alert">{{ comentario_form.errors }}</div>{% endif %}
+<button class="btn btn-outline-dark btn-sm">Comentar</button></form></section></div></article>
+{% empty %}<p class="empty-state">Todavía no hay publicaciones{% if etiqueta %} con esta etiqueta{% endif %}. ¡Comparte algo con tu sede!</p>{% endfor %}
+</section></div></div>
+{% else %}<p class="empty-state">Necesitas una sede asignada para participar en el foro. Contacta a la DAE.</p>{% endif %}
+{% endblock %}

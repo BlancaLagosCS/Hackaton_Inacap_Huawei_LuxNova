@@ -25,7 +25,7 @@
       <div class="collapse navbar-collapse" id="navegacion">
         <ul class="navbar-nav me-auto">
           <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}" href="{% url 'core:home' %}">Inicio / Eventos</a></li>
-          <li class="nav-item"><a class="nav-link" href="{% url 'core:ahora_mismo' %}">Ahora Mismo</a></li>
+          <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'foro' %}active{% endif %}" href="{% url 'core:foro' %}">Ahora Mismo</a></li>
           <li class="nav-item"><a class="nav-link" href="{% url 'core:inbox' %}">Inbox <span class="badge rounded-pill text-bg-danger" aria-label="{{ inbox_no_leidos }} mensajes no leídos">{{ inbox_no_leidos }}</span></a></li>
           <li class="nav-item"><a class="nav-link" href="{% url 'core:perfil' %}">Mi Perfil</a></li>
         </ul>

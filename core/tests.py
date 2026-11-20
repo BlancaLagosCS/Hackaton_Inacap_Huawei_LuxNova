@@ -52,7 +52,7 @@ class FlujosV2Tests(TestCase):
         self.assertFalse(respuesta.context['eventos_sede'].exists())
         self.assertFalse(respuesta.context['eventos_intersede'].exists())
         for nombre in ['ahora_mismo', 'inbox', 'perfil']:
-            self.assertEqual(self.client.get(reverse('core:' + nombre)).status_code, 200)
+            self.assertEqual(self.client.get(reverse('core:' + nombre), follow=True).status_code, 200)
 
     # Comprueba inscripción, cancelación y permisos; recibe fixtures y devuelve aserciones.
     def test_preinscripcion_y_permisos(self):

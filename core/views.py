@@ -3,12 +3,15 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Prefetch
+from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import RegistroForm
-from .models import Evento, MensajeInbox, PublicacionForo
+from .forms import ComentarioForoForm, PublicacionForoForm, RegistroForm
+from .models import ComentarioForo, Evento, MensajeInbox, PublicacionForo
+from .services import notificar_iniciativa
 
 
 # Recibe una petición y devuelve bienvenida o eventos futuros aprobados por alcance y sede.
@@ -57,11 +60,67 @@ def preinscripcion(request, evento_id):
     return redirect('core:home')
 
 
-# Recibe una petición autenticada; devuelve publicaciones de la sede en una vista básica de lectura.
+# Recibe una petición autenticada de la ruta antigua y devuelve la redirección al foro canónico.
 @login_required
 def ahora_mismo(request):
-    publicaciones = PublicacionForo.objects.filter(sede_publ_id=request.user.sede_usu_id).select_related('aut_publ').order_by('-fech_publ') if request.user.sede_usu_id else PublicacionForo.objects.none()
-    return render(request, 'ahora_mismo.html', {'publicaciones': publicaciones})
+    return redirect('core:foro')
+
+
+# Recibe la petición y formularios opcionales; devuelve el contexto del muro estrictamente limitado a la sede actual.
+def contexto_foro(request, formulario=None, comentario=None, publicacion_error=None):
+    publicaciones = PublicacionForo.objects.none()
+    etiqueta = request.GET.get('etiqueta', '')
+    if etiqueta not in ('AHORA_MISMO', 'NOTICIA', 'INICIATIVA'):
+        etiqueta = ''
+    if request.user.sede_usu_id:
+        publicaciones = PublicacionForo.objects.filter(sede_publ_id=request.user.sede_usu_id).select_related('aut_publ').prefetch_related(
+            Prefetch('comentarios', queryset=ComentarioForo.objects.select_related('aut_come').order_by('fech_come', 'pk'))
+        ).order_by('-fech_publ', '-pk')
+        if etiqueta:
+            publicaciones = publicaciones.filter(etiq_publ=etiqueta)
+    return {'publicaciones': publicaciones, 'form': formulario if formulario is not None else PublicacionForoForm(),
+            'comentario_form': comentario, 'publicacion_error': publicacion_error, 'etiqueta': etiqueta}
+
+
+# Recibe GET o POST autenticado; muestra el muro por sede o guarda publicación y avisos de iniciativa en una transacción.
+@login_required
+@require_http_methods(['GET', 'POST'])
+def foro_ahora_mismo(request):
+    form = PublicacionForoForm(request.POST if request.method == 'POST' else None, request.FILES or None)
+    if request.method == 'POST':
+        if not request.user.sede_usu_id:
+            return HttpResponseForbidden('Necesitas una sede asignada para publicar.')
+        if form.is_valid():
+            with transaction.atomic():
+                publicacion = form.save(commit=False)
+                publicacion.aut_publ = request.user
+                publicacion.sede_publ = request.user.sede_usu
+                publicacion.save()
+                enviados = notificar_iniciativa(publicacion)
+            if publicacion.etiq_publ == 'INICIATIVA':
+                messages.success(request, f'Iniciativa publicada y enviada al buzón de Líderes y DAE ({enviados} destinatarios).')
+            else:
+                messages.success(request, 'Tu publicación ya está en el muro de tu sede.')
+            return redirect('core:foro')
+    return render(request, 'foro.html', contexto_foro(request, formulario=form))
+
+
+# Recibe POST y el ID de una publicación; valida su sede y guarda un comentario propio o devuelve errores de formulario.
+@require_POST
+@login_required
+def comentar_publicacion(request, publ_id):
+    if not request.user.sede_usu_id:
+        return HttpResponseForbidden('Necesitas una sede asignada para comentar.')
+    publicacion = get_object_or_404(PublicacionForo, pk=publ_id, sede_publ_id=request.user.sede_usu_id)
+    form = ComentarioForoForm(request.POST)
+    if form.is_valid():
+        comentario = form.save(commit=False)
+        comentario.publ_come = publicacion
+        comentario.aut_come = request.user
+        comentario.save()
+        messages.success(request, 'Comentario publicado.')
+        return redirect('core:foro')
+    return render(request, 'foro.html', contexto_foro(request, comentario=form, publicacion_error=publicacion.pk), status=400)
 
 
 # Recibe una petición autenticada; devuelve exclusivamente los mensajes dirigidos al usuario.
