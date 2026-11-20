@@ -79,4 +79,5 @@ body a { color: #FFFFFF; }
 .inbox-tabs .nav-link { color: #1A1A1A; background: #E9A0A2; border: 1px solid #E61E28; }
 .inbox-tabs .nav-link.active { color: #FFFFFF; background: #E61E28; }
 .pending-aval { border-left: 6px solid #E61E28; }
+.alert-error { background: #FFFFFF; color: #9D1916; border: 2px solid #E61E28; }
 @media (max-width: 767px) { .header-superior { flex-wrap: wrap; padding-block: 1rem; gap: .5rem; } .header-search { width: 58%; } .institutional-logo { width: 20%; } .header-view-title { position: static; transform: none; width: 100%; order: 4; } .navbar-inferior a { padding: .5rem; font-size: .875rem; } }

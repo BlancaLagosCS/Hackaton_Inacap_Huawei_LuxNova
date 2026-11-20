@@ -20,7 +20,8 @@
     <div class="header-view-title">{% block titulo_vista %}{{ titulo_vista_default }}{% endblock %}</div>
     <a class="institutional-logo" href="{% url 'core:home' %}" aria-label="INACAP Smart, inicio">
       <!-- ESPACIO LOGO INSTITUCIONAL AQUI (LogoInacap 20% width) -->
-      <span class="logo-placeholder">LogoInacap</span>
+      <img src="{% static 'logo.png' %}" alt="Logo INACAP" class="img-fluid" style="max-height: 56px; object-fit: contain;" onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
+      <span hidden class="text-white fw-bold">INACAP</span>
     </a>
   </div>
   <div class="header-session">{% if user.is_authenticated %}{{ user.sede_usu.nom_sede|default:'Sin sede asignada' }}{% else %}<a href="{% url 'core:login' %}">Iniciar sesión</a><span aria-hidden="true"> · </span><a href="{% url 'core:registro' %}">Registrarse</a>{% endif %}</div>
@@ -30,6 +31,6 @@
   {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
   {% block content %}{% endblock %}
 </main>
-<footer class="container py-4 border-top d-flex flex-wrap justify-content-between gap-2 small text-secondary"><span>LuxNova · Comunidad que conecta.</span><span>Hackatón INACAP · Huawei</span></footer>
+<footer class="container py-4 border-top small text-secondary">INACAP Smart — Piloto Sede Rancagua (Datos 100% ficticios | Notificaciones externas simuladas vía Inbox interno)</footer>
 </body>
 </html>

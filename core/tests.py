@@ -1,12 +1,40 @@
 from datetime import timedelta
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from django import forms
 from django.db import IntegrityError
 from unittest.mock import patch
 from .forms import validar_rut_chileno
-from .models import AvalClub, Club, Evento, MensajeInbox, PublicacionForo, Sede, Usuario
+from .models import AvalClub, Club, Evento, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
+
+
+# Usa conexiones PostgreSQL independientes; recibe una base transaccional y verifica dos aprobaciones simultáneas en el mismo espacio.
+class ConcurrenciaV6Tests(TransactionTestCase):
+    # Recibe IDs de DAE y evento; abre conexión propia, ejecuta aprobación y devuelve el estado HTTP cerrando sus conexiones.
+    def aprobar_en_hilo(self, usuario_id, evento_id):
+        from django.db import close_old_connections, connections
+        close_old_connections()
+        try:
+            cliente = Client()
+            cliente.force_login(Usuario.objects.get(pk=usuario_id))
+            return cliente.post(reverse('core:resolver_evento', args=[evento_id, 'aprobar'])).status_code
+        finally:
+            connections.close_all()
+
+    # Crea dos solicitudes idénticas y dos DAE; ejecuta en paralelo y verifica una sola aprobación y auditoría.
+    def test_aprobaciones_simultaneas(self):
+        from concurrent.futures import ThreadPoolExecutor
+        sede = Sede.objects.create(nom_sede='Sede concurrencia ficticia', dir_sede='Demo')
+        usuarios = [Usuario.objects.create_user(username=f'dae_concurrente{i}', rut_usu=f'DEMO-CONC-{i}', corr_usu=f'dae{i}@inacap.cl', rol_usu='DAE', sede_usu=sede) for i in range(2)]
+        fecha = timezone.now() + timedelta(days=5)
+        eventos = [Evento.objects.create(tit_even=f'Solicitud demo {i}', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=sede, esp_even='Auditorio Principal', fech_even=fecha, crea_even=usuarios[i]) for i in range(2)]
+        with ThreadPoolExecutor(max_workers=2) as ejecutor:
+            tareas = [ejecutor.submit(self.aprobar_en_hilo, u.pk, e.pk) for u, e in zip(usuarios, eventos)]
+            self.assertEqual([t.result(timeout=20) for t in tareas], [302, 302])
+        self.assertEqual(Evento.objects.filter(est_even='APROBADO').count(), 1)
+        self.assertEqual(Evento.objects.filter(est_even='PENDIENTE_DAE').count(), 1)
+        self.assertEqual(RegistroAuditoria.objects.count(), 1)
 
 
 # Verifica dominios, buzón y avales v5; recibe una base de pruebas y devuelve resultados de autorización y transición.
@@ -145,7 +173,14 @@ class BuzonV5Tests(TestCase):
         for username in ['est1', 'est2', 'est3', 'est4', 'est5', 'lider_rancagua', 'dae_rancagua']:
             usuario = Usuario.objects.get(username=username)
             dominio = 'inacap.cl' if username == 'dae_rancagua' else 'inacapmail.cl'
-            self.assertEqual(usuario.corr_usu, f'{username}@{dominio}')
+            correo = {'dae_rancagua': 'dae.rancagua@inacap.cl', 'lider_rancagua': 'lider.rancagua@inacapmail.cl'}.get(username, f'{username}@{dominio}')
+            self.assertEqual(usuario.corr_usu, correo)
+        for username, clave in [('root_admin', 'Admin1234!'), ('dae_rancagua', 'Dae1234!'), ('jefe_informatica', 'Jefe1234!'), ('lider_rancagua', 'Lider1234!')] + [(f'est{i}', 'Est1234!') for i in range(1, 6)]:
+            usuario = Usuario.objects.get(username=username)
+            self.assertTrue(usuario.check_password(clave))
+            self.assertEqual(validar_rut_chileno(usuario.rut_usu), usuario.rut_usu)
+        root = Usuario.objects.get(username='root_admin')
+        self.assertTrue(root.is_staff and root.is_superuser)
 
     # Simula fallo al generar avisos del cuarto aval; verifica rollback de respuesta, estado del club y lectura del mensaje.
     def test_rollback_cuarto_aval(self):
@@ -350,3 +385,119 @@ class FlujosV2Tests(TestCase):
         token = cliente.cookies['csrftoken'].value
         self.assertEqual(cliente.post(url, {'csrfmiddlewaretoken': token}).status_code, 302)
         self.assertTrue(self.evento.asis_even.filter(pk=self.usuario.pk).exists())
+
+
+
+# Comprueba el recorrido final y sus permisos; recibe una base aislada y devuelve aserciones de club, eventos y auditoría.
+class CierreV6Tests(TestCase):
+    # Crea actores y sedes ficticios; no recibe datos externos ni devuelve valor.
+    def setUp(self):
+        self.sede = Sede.objects.create(nom_sede='Sede v6', dir_sede='Demo')
+        self.otra = Sede.objects.create(nom_sede='Otra v6', dir_sede='Demo')
+        self.estudiante = self.usuario('estudiante', 'ESTUDIANTE')
+        self.dae = self.usuario('dae', 'DAE')
+        self.jefe = self.usuario('jefe', 'JEFATURA')
+        self.pares = [self.usuario(f'par{i}', 'ESTUDIANTE') for i in range(4)]
+
+    # Recibe nombre, rol y sede opcional; devuelve una cuenta sintética única para las pruebas.
+    def usuario(self, nombre, rol, sede=None):
+        return Usuario.objects.create_user(username=f'v6_{nombre}', nom_usu=f'Demo {nombre}', rut_usu=f'FICTICIO-V6-{nombre}', corr_usu=f'{nombre}@inacapmail.cl', rol_usu=rol, sede_usu=sede or self.sede)
+
+    # Recibe campos opcionales; devuelve un POST de evento futuro con hora local y espacio permitido.
+    def datos_evento(self, **cambios):
+        datos = {'tit_even': 'Evento v6', 'desc_even': 'Demostración ficticia', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': timezone.localtime(timezone.now() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}
+        datos.update(cambios)
+        return datos
+
+    # Recibe el recorrido completo; verifica cuatro avales, ascenso, auditoría, reserva y publicación del evento aprobado.
+    def test_flujo_completo(self):
+        self.client.force_login(self.estudiante)
+        self.assertRedirects(self.client.post('/club/postular/', {'nom_club': 'Club v6', 'cat_club': 'OTRO', 'desc_club': 'Demo', 'avales': [u.pk for u in self.pares]}), '/perfil/')
+        club = Club.objects.get(nom_club='Club v6')
+        self.assertEqual(club.est_club, 'PENDIENTE_AVALES')
+        self.assertEqual(club.avales.count(), 4)
+        self.assertEqual(MensajeInbox.objects.filter(club_inbo=club, tipo_inbo='SOLICITUD_AVAL').count(), 4)
+        for aval in club.avales.select_related('estu_aval'):
+            self.client.force_login(aval.estu_aval)
+            self.client.post(reverse('core:responder_aval', args=[aval.pk]), {'decision': 'ACEPTADO'})
+        club.refresh_from_db()
+        self.assertEqual(club.est_club, 'PENDIENTE_DAE')
+        self.client.force_login(self.dae)
+        url = reverse('core:resolver_club', args=[club.pk, 'aprobar'])
+        self.assertRedirects(self.client.post(url), '/perfil/')
+        club.refresh_from_db()
+        self.estudiante.refresh_from_db()
+        self.assertEqual(club.est_club, 'APROBADO')
+        self.assertEqual(self.estudiante.rol_usu, 'LIDER_ESTUDIANTIL')
+        self.assertTrue(RegistroAuditoria.objects.filter(acc_audi='Aprobó Club Estudiantil', dae_audi=self.dae).exists())
+        self.client.post(url)
+        self.assertEqual(RegistroAuditoria.objects.count(), 1)
+        self.client.force_login(self.estudiante)
+        self.assertRedirects(self.client.post('/evento/solicitar/', self.datos_evento()), '/perfil/')
+        evento = Evento.objects.get(tit_even='Evento v6')
+        self.assertEqual(evento.est_even, 'PENDIENTE_DAE')
+        self.client.force_login(self.dae)
+        self.assertRedirects(self.client.post(reverse('core:resolver_evento', args=[evento.pk, 'aprobar'])), '/perfil/')
+        self.assertContains(self.client.get('/'), 'Evento v6')
+        self.assertEqual(RegistroAuditoria.objects.count(), 2)
+        self.client.force_login(self.jefe)
+        self.assertContains(self.client.get('/perfil/'), self.estudiante.nom_usu)
+
+    # Crea eventos aprobados y pendientes; verifica conflicto inclusivo de dos horas y separación por sede/espacio.
+    def test_solapamiento(self):
+        base = timezone.now() + timedelta(days=5)
+        aprobado = Evento.objects.create(tit_even='Ocupado', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='Auditorio Principal', fech_even=base, crea_even=self.dae, est_even='APROBADO')
+        pendiente = Evento.objects.create(tit_even='Pendiente', desc_even='Demo', cat_even='TODO_PUBLICO', sede_even=self.sede, esp_even='auditorio principal', fech_even=base + timedelta(hours=2), crea_even=self.jefe)
+        self.client.force_login(self.dae)
+        url = reverse('core:resolver_evento', args=[pendiente.pk, 'aprobar'])
+        self.assertContains(self.client.post(url, follow=True), 'Conflicto de espacio:')
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.est_even, 'PENDIENTE_DAE')
+        self.assertFalse(RegistroAuditoria.objects.exists())
+        Evento.objects.filter(pk=pendiente.pk).update(fech_even=base + timedelta(hours=2, seconds=1))
+        self.client.post(url)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.est_even, 'APROBADO')
+        self.client.post(url)
+        self.assertEqual(RegistroAuditoria.objects.count(), 1)
+        datos = self.datos_evento(fech_even=timezone.localtime(base).strftime('%Y-%m-%dT%H:%M'))
+        self.assertContains(self.client.post('/evento/solicitar/', datos), 'Conflicto de espacio:')
+        self.assertEqual(Evento.objects.count(), 2)
+        self.assertRedirects(self.client.post('/evento/solicitar/', {**datos, 'esp_even': 'Sala Multiuso 101'}), '/perfil/')
+        self.assertTrue(Evento.objects.filter(tit_even='Evento v6', est_even='APROBADO').exists())
+
+    # Recibe acciones manipuladas y pares ajenos; verifica controles de rol, sede, cuatro avalistas y flags Django.
+    def test_permisos_y_roles(self):
+        ajeno = self.usuario('ajeno', 'ESTUDIANTE', self.otra)
+        self.client.force_login(self.estudiante)
+        datos = {'nom_club': 'No guardar', 'cat_club': 'OTRO', 'desc_club': 'Demo', 'avales': [u.pk for u in self.pares[:3]]}
+        self.assertContains(self.client.post('/club/postular/', datos), 'Debes seleccionar exactamente 4')
+        self.assertContains(self.client.post('/club/postular/', {**datos, 'avales': []}), 'Debes seleccionar exactamente 4')
+        self.client.post('/club/postular/', {**datos, 'avales': [u.pk for u in self.pares[:3]] + [ajeno.pk]})
+        self.assertFalse(Club.objects.exists())
+        self.assertEqual(self.client.post('/evento/solicitar/', self.datos_evento()).status_code, 403)
+        rol_url = reverse('core:cambiar_rol', args=[self.pares[0].pk])
+        self.assertEqual(self.client.post(rol_url, {'rol_usu': 'ADMIN'}).status_code, 403)
+        self.client.force_login(self.dae)
+        self.assertEqual(self.client.get(rol_url).status_code, 405)
+        self.assertEqual(self.client.post(reverse('core:cambiar_rol', args=[ajeno.pk]), {'rol_usu': 'ADMIN'}).status_code, 404)
+        self.assertEqual(self.client.post(rol_url, {'rol_usu': 'INVALIDO'}).status_code, 400)
+        self.client.post(rol_url, {'rol_usu': 'DELEGADO'})
+        self.pares[0].refresh_from_db()
+        self.assertEqual(self.pares[0].rol_usu, 'DELEGADO')
+        self.assertFalse(self.pares[0].is_staff)
+        self.assertTrue(RegistroAuditoria.objects.filter(acc_audi='Cambió rol de usuario').exists())
+
+    # Recibe un club listo sin cuatro avales; verifica que la DAE no pueda saltarse la validación comunitaria.
+    def test_club_incompleto_y_rechazo(self):
+        club = Club.objects.create(nom_club='Incompleto', cat_club='OTRO', desc_club='Demo', sede_club=self.sede, lid_club=self.estudiante, est_club='PENDIENTE_DAE')
+        self.client.force_login(self.dae)
+        self.client.post(reverse('core:resolver_club', args=[club.pk, 'aprobar']))
+        club.refresh_from_db()
+        self.assertEqual(club.est_club, 'PENDIENTE_DAE')
+        self.client.post(reverse('core:resolver_club', args=[club.pk, 'rechazar']))
+        club.refresh_from_db()
+        self.estudiante.refresh_from_db()
+        self.assertEqual(club.est_club, 'RECHAZADO')
+        self.assertEqual(self.estudiante.rol_usu, 'ESTUDIANTE')
+        self.assertTrue(RegistroAuditoria.objects.filter(acc_audi='Rechazó Club Estudiantil').exists())

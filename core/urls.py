@@ -18,4 +18,9 @@ urlpatterns = [
     path('inbox/aval/<int:aval_id>/', views.responder_aval, name='responder_aval'),
     path('perfil/', views.mi_perfil, name='perfil'),
     path('perfil/<int:usuario_id>/', views.ver_perfil, name='ver_perfil'),
+    path('club/postular/', views.postular_club, name='postular_club'),
+    path('evento/solicitar/', views.solicitar_evento, name='solicitar_evento'),
+    path('panel/club/<int:club_id>/<str:accion>/', views.aprobar_rechazar_club, name='resolver_club'),
+    path('panel/evento/<int:evento_id>/<str:accion>/', views.aprobar_rechazar_evento, name='resolver_evento'),
+    path('panel/usuario/<int:usuario_id>/rol/', views.cambiar_rol_usuario, name='cambiar_rol'),
 ]

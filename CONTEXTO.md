@@ -93,7 +93,7 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
   - Alcance: Rutas /perfil/ y /perfil/<id>/ con foto circular, bio editable, insignia de rol, carrera, año, sede, privacidad estricta de tel_usu (solo visible para Líderes, Delegados, Jefatura y DAE), historial público de eventos asistidos/organizados y tarjeta resumen en vivo del próximo evento para Líderes/DAE.
 - v5 — Inbox del Sistema (Chat Oficial + Confirmación de 4 Avales + Buzón Iniciativas) [COMPLETADA]:
   - Alcance: Ruta /inbox/ con badge de no leídos, mensajes oficiales del Sistema con botones Aceptar / Rechazar Aval (al llegar a 4 avales aceptados, el Club escala automáticamente a PENDIENTE_DAE y notifica a la DAE) y pestaña Buzón de Iniciativas visible solo para Líderes y DAE.
-- v6 — Postulación a Club, Reserva de Espacios (Sin Solapamientos) y Panel/Auditoría DAE [VERSIÓN FINAL - PENDIENTE]:
+- v6 — Postulación a Club, Reserva de Espacios (Sin Solapamientos) y Panel/Auditoría DAE [COMPLETADA — VERSIÓN FINAL]:
   - Alcance: Formularios integrados en Mi Perfil según rol: (1) Postulación a Club seleccionando 4 compañeros de sede; (2) Solicitud de Reserva de Espacio/Evento; (3) Panel DAE/Admin para aprobar clubes (ascendiendo al creador a LIDER_ESTUDIANTIL + aviso Inbox), aprobar eventos validando no solapamiento de espacio/fecha/sede, editar roles de usuarios y visualizar la tabla de RegistroAuditoria.
 
 ## 5. Registro y catálogo oficial de carreras (v4)
@@ -113,7 +113,7 @@ El registro usa un selector cerrado. Las ingenierías indican 4 años; los técn
 
 `validar_rut_chileno` limpia puntos/espacios, acepta DV numérico o K, verifica Módulo 11 y devuelve cuerpo-DV (sin ceros iniciales, K mayúscula). El formulario exige RUT válido y comprueba unicidad de rut_usu y corr_usu sin distinguir mayúsculas; el correo se guarda en minúsculas. La vista repite consultas de duplicados y captura IntegrityError dentro de una transacción para mostrar un error Bootstrap si hay una inserción concurrente. Se conservan las restricciones unique existentes en PostgreSQL. Datos históricos ajenos a la demo no se reescriben automáticamente.
 
-Perfil: `/perfil/` permite solo al dueño editar foto/bio; `/perfil/<id>/` es una consulta para usuarios autenticados. `?formato=json` devuelve un resumen autorizado del evento aprobado próximo o más reciente del organizador; JS Vanilla lo actualiza cada 20 segundos. Los contadores e historial “Eventos Asistidos” representan la relación de preinscripción existente: todavía no hay control de asistencia efectiva. Los botones v6 están deshabilitados y rotulados como pendientes.
+Perfil: `/perfil/` permite solo al dueño editar foto/bio; `/perfil/<id>/` es una consulta para usuarios autenticados. `?formato=json` devuelve un resumen autorizado del evento aprobado próximo o más reciente del organizador; JS Vanilla lo actualiza cada 20 segundos. Los contadores e historial “Eventos Asistidos” representan la relación de preinscripción existente: todavía no hay control de asistencia efectiva. Desde v6, el perfil propio incluye formularios y gestión según rol.
 
 Memoria técnica acumulativa: [CONTEXTO_VERSIONES.md](CONTEXTO_VERSIONES.md).
 
@@ -125,4 +125,20 @@ Registro: corr_usu se normaliza a minúsculas y admite exclusivamente dominios e
 
 `/inbox/aval/<id>/` solo acepta POST con CSRF y dueño del aval en la misma sede del club. Se almacena una única respuesta ACEPTADO/RECHAZADO con fecha; no se puede cambiar una respuesta ni actuar sobre clubes cerrados. Una transacción con bloqueo del club serializa las respuestas concurrentes. Exactamente cuatro estudiantes distintos, de la sede y diferentes del creador, deben aceptar para pasar a PENDIENTE_DAE; se notifica una sola vez al creador y a cada DAE de la sede. Rechazar avisa al creador y deja el club en espera de avales, sin aprobación automática.
 
-La demo agrega un club de est1 y solicita aval a est2–est5; repetir la carga no reinicia respuestas ni duplica avales o mensajes. V6 sigue pendiente: postulación a club desde Mi Perfil, reserva/evento y Panel de Aprobaciones/Auditoría DAE.
+La demo agrega un club de est1 y solicita aval a est2–est5; repetir la carga no reinicia respuestas ni duplica avales o mensajes. La v6 conecta postulación a club desde Mi Perfil, reserva/evento y Panel de Aprobaciones/Auditoría DAE.
+
+## 7. Cierre funcional v6 (vigente)
+
+La v6 completa los flujos pendientes de las versiones anteriores. Desde Mi cuenta, ESTUDIANTE postula clubes con exactamente cuatro compañeros activos ESTUDIANTE de su sede; se crean avales y solicitudes en Inbox dentro de una transacción. El perfil muestra estados y contador de avales. Tras cuatro aceptaciones, DAE/ADMIN resuelven el club desde el panel local; aprobar promueve a LIDER_ESTUDIANTIL únicamente si el creador era ESTUDIANTE. Cada resolución notifica y se registra en RegistroAuditoria; reenviar una resolución terminal no duplica efectos.
+
+Líderes, Delegados, Jefatura, DAE y ADMIN solicitan eventos con banner opcional y fecha futura local. Los espacios del selector son Auditorio Principal, Sala Multiuso 101, Laboratorio Computación 3, Patio Central / Ágora y Cancha Deportiva. La sede y creador se asignan en servidor. Gestores normales quedan PENDIENTE_DAE; DAE/ADMIN crean directamente APROBADO solo si está libre, dejando auditoría.
+
+Disponibilidad: comparar eventos APROBADO de la misma sede, espacio sin distinguir mayúsculas y fecha de inicio dentro de ±2 horas **inclusivas**. Se bloquea la fila de Sede dentro de una transacción antes de comprobar y aprobar, tanto desde creación directa como desde el panel. Esto serializa aprobaciones simultáneas incluso si aún no existe una reserva. El esquema no incluye duración; esta ventana es la regla del piloto. No crear eventos por fuera de estos flujos para eludir el control (por ejemplo, ORM directo o admin Django).
+
+En el perfil propio DAE/ADMIN: tres métricas locales (relaciones de preinscripción en eventos aprobados, iniciativas únicas publicadas en la sede y eventos aprobados), bandejas de clubes/eventos, gestión de rol_usu y auditoría. Todas las acciones requieren POST/CSRF, DAE/ADMIN y objeto de su sede. Cambiar rol_usu no cambia is_staff/is_superuser. JEFATURA ve Líderes/Delegados de su sede y cantidad de eventos aprobados organizados. Las vistas públicas no exponen paneles de gestión.
+
+Logo oficial: `Galeria/logo.png`, disponible como `{% static 'logo.png' %}` porque STATICFILES_DIRS incluye static/ y Galeria/. El header conserva ancho 20% y muestra INACAP blanco si falla la imagen. El pie explica datos ficticios y notificaciones externas simuladas vía Inbox.
+
+Cuentas y guion de presentación: [CREDENCIALES.md](CREDENCIALES.md). cargar_datos_demo usa update_or_create para nueve cuentas de Rancagua, restablece sus roles y contraseñas según ese archivo, conserva relaciones y no reinicia decisiones de clubes/avales/eventos. Las antiguas contraseñas 1234 ya no aplican. Solo root_admin tiene flags Django is_staff/is_superuser. RUTs demo son identificadores sintéticos con DV válido, sin afirmar identidad de personas reales. Ejecutar la carga antes de la demostración; no entre el ascenso de est1 y la creación de su evento.
+
+Rutas finales: `/club/postular/`, `/evento/solicitar/`, `/panel/club/<id>/<aprobar|rechazar>/`, `/panel/evento/<id>/<aprobar|rechazar>/`, `/panel/usuario/<id>/rol/`. Formularios y panel se integran en `/perfil/`. Nube Huawei sigue como destino arquitectónico; esta instancia usa PostgreSQL y archivos locales. No se ha implementado verificación de asistencia presencial.

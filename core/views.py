@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
@@ -10,8 +12,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ComentarioForoForm, EditarPerfilForm, PublicacionForoForm, RegistroUsuarioForm
-from .models import AvalClub, Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, Usuario
+from .forms import ComentarioForoForm, EditarPerfilForm, PostularClubForm, PublicacionForoForm, RegistroUsuarioForm, SolicitarEventoForm
+from .models import AvalClub, Club, ComentarioForo, Evento, MensajeInbox, PublicacionForo, RegistroAuditoria, Sede, Usuario
 from .services import notificar_iniciativa
 
 
@@ -229,7 +231,7 @@ def resumen_perfil(visitante, perfil_usuario):
 
 
 # Recibe petición, perfil y formulario opcional; devuelve HTML o métricas JSON sin teléfonos no autorizados.
-def mostrar_perfil(request, perfil_usuario, form=None):
+def mostrar_perfil(request, perfil_usuario, form=None, negocio=None):
     resumen = resumen_perfil(request.user, perfil_usuario)
     if request.GET.get('formato') == 'json':
         respuesta = JsonResponse({'resumen': resumen})
@@ -243,7 +245,8 @@ def mostrar_perfil(request, perfil_usuario, form=None):
         'clubes_liderados': Club.objects.filter(lid_club=perfil_usuario, est_club='APROBADO'),
         'publicaciones_perfil': PublicacionForo.objects.filter(aut_publ=perfil_usuario, sede_publ_id=request.user.sede_usu_id).order_by('-fech_publ') if request.user.sede_usu_id else PublicacionForo.objects.none(),
         'publicaciones_count': PublicacionForo.objects.filter(aut_publ=perfil_usuario).count(),
-        'resumen': resumen, 'perfil_form': form})
+        'resumen': resumen, 'perfil_form': form,
+        **(contexto_gestion(request, negocio) if request.user.pk == perfil_usuario.pk else {})})
 
 
 # Recibe GET/POST del propietario; guarda foto/bio permitidas y devuelve su perfil o errores sin editar identidad ni rol.
@@ -264,3 +267,165 @@ def mi_perfil(request):
 def ver_perfil(request, usuario_id):
     perfil_usuario = get_object_or_404(Usuario.objects.select_related('sede_usu'), pk=usuario_id)
     return mostrar_perfil(request, perfil_usuario)
+
+
+# Recibe petición del propietario y formularios opcionales; devuelve datos de gestión limitados a su rol y sede.
+def contexto_gestion(request, negocio=None):
+    usuario = request.user
+    contexto = {'postulaciones': Club.objects.filter(lid_club=usuario).annotate(aceptados=Count('avales', filter=Q(avales__est_aval='ACEPTADO'))).order_by('-fech_club'),
+                'solicitudes_evento': Evento.objects.filter(crea_even=usuario).order_by('-fech_even')}
+    if usuario.rol_usu == 'ESTUDIANTE':
+        contexto['club_form'] = PostularClubForm(user=usuario)
+    if usuario.rol_usu in ROLES_GESTION:
+        contexto['evento_form'] = SolicitarEventoForm()
+    if usuario.sede_usu_id and usuario.rol_usu == 'JEFATURA':
+        contexto['lideres_sede'] = Usuario.objects.filter(sede_usu_id=usuario.sede_usu_id, rol_usu__in=['LIDER_ESTUDIANTIL', 'DELEGADO']).annotate(total_eventos=Count('evento', filter=Q(evento__est_even='APROBADO'))).order_by('nom_usu')
+    if usuario.sede_usu_id and usuario.rol_usu in ('DAE', 'ADMIN'):
+        sede = usuario.sede_usu_id
+        contexto.update({'panel_dae': True,
+            'preinscripciones_total': Evento.asis_even.through.objects.filter(evento__sede_even_id=sede, evento__est_even='APROBADO').count(),
+            'iniciativas_total': PublicacionForo.objects.filter(sede_publ_id=sede, etiq_publ='INICIATIVA').count(),
+            'eventos_aprobados_total': Evento.objects.filter(sede_even_id=sede, est_even='APROBADO').count(),
+            'clubes_pendientes': Club.objects.filter(sede_club_id=sede, est_club='PENDIENTE_DAE').select_related('lid_club'),
+            'eventos_pendientes': Evento.objects.filter(sede_even_id=sede, est_even='PENDIENTE_DAE').select_related('crea_even').order_by('fech_even'),
+            'usuarios_sede': Usuario.objects.filter(sede_usu_id=sede).order_by('username'),
+            'roles_choices': Usuario._meta.get_field('rol_usu').choices,
+            'auditoria_sede': RegistroAuditoria.objects.filter(dae_audi__sede_usu_id=sede).select_related('dae_audi').order_by('-fech_audi', '-pk')})
+    if negocio:
+        contexto.update(negocio)
+    return contexto
+
+
+# Recibe un evento; devuelve si existe otro aprobado en el mismo espacio/sede dentro de ±2 horas inclusivas.
+def conflicto_espacio(evento):
+    return Evento.objects.filter(sede_even_id=evento.sede_even_id, esp_even__iexact=evento.esp_even.strip(), est_even='APROBADO',
+        fech_even__gte=evento.fech_even - timedelta(hours=2), fech_even__lte=evento.fech_even + timedelta(hours=2)).exclude(pk=evento.pk).exists()
+
+
+# Recibe GET/POST estudiantil; guarda club, cuatro avales y sus avisos atómicamente y devuelve perfil con confirmación o errores.
+@login_required
+@require_http_methods(['GET', 'POST'])
+def postular_club(request):
+    if request.user.rol_usu != 'ESTUDIANTE' or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Solo estudiantes con sede pueden postular clubes.')
+    form = PostularClubForm(request.POST if request.method == 'POST' else None, user=request.user)
+    if request.method == 'POST' and form.is_valid():
+        with transaction.atomic():
+            club = form.save(commit=False)
+            club.sede_club = request.user.sede_usu
+            club.lid_club = request.user
+            club.est_club = 'PENDIENTE_AVALES'
+            club.save()
+            for estudiante in form.cleaned_data['avales']:
+                AvalClub.objects.create(club_aval=club, estu_aval=estudiante)
+                MensajeInbox.objects.create(dest_inbo=estudiante, remi_inbo=None, tipo_inbo='SOLICITUD_AVAL', club_inbo=club,
+                    asun_inbo=f'Solicitud de Aval para Club: {club.nom_club}'[:255],
+                    cuer_inbo=f"{request.user.nom_usu} te invita a avalar la creación del club '{club.nom_club}' ({club.get_cat_club_display()}). Responde en tu Buzón de sugerencias.")
+        messages.success(request, 'Postulación enviada: tus cuatro compañeros recibieron la solicitud de aval.')
+        return redirect('core:perfil')
+    return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'club_form': form})
+
+
+# Recibe GET/POST de un gestor; guarda solicitud o aprueba directamente para DAE/ADMIN sin conflicto y devuelve perfil.
+@login_required
+@require_http_methods(['GET', 'POST'])
+def solicitar_evento(request):
+    if request.user.rol_usu not in ROLES_GESTION or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Necesitas un rol de gestión y una sede para solicitar eventos.')
+    form = SolicitarEventoForm(request.POST if request.method == 'POST' else None, request.FILES or None)
+    if request.method == 'POST' and form.is_valid():
+        with transaction.atomic():
+            Sede.objects.select_for_update().get(pk=request.user.sede_usu_id)
+            evento = form.save(commit=False)
+            evento.sede_even = request.user.sede_usu
+            evento.crea_even = request.user
+            evento.est_even = 'PENDIENTE_DAE'
+            directo = request.user.rol_usu in ('DAE', 'ADMIN')
+            if directo and conflicto_espacio(evento):
+                form.add_error('fech_even', 'Conflicto de espacio: ya existe un evento aprobado en ese espacio y horario.')
+            else:
+                if directo:
+                    evento.est_even = 'APROBADO'
+                evento.save()
+                if directo:
+                    RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Creó y aprobó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; fecha {evento.fech_even.isoformat()}')
+                messages.success(request, 'Evento publicado.' if directo else 'Solicitud de espacio y evento enviada a la DAE.')
+                return redirect('core:perfil')
+    return mostrar_perfil(request, request.user, EditarPerfilForm(instance=request.user), {'evento_form': form})
+
+
+# Recibe POST de DAE/ADMIN y club local; aplica una resolución terminal con ascenso, aviso y auditoría, o devuelve rechazo seguro.
+@login_required
+@require_POST
+def aprobar_rechazar_club(request, club_id, accion):
+    if request.user.rol_usu not in ('DAE', 'ADMIN') or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Acceso exclusivo para DAE y ADMIN de la sede.')
+    if accion not in ('aprobar', 'rechazar'):
+        return JsonResponse({'error': 'Acción inválida.'}, status=400)
+    with transaction.atomic():
+        club = get_object_or_404(Club.objects.select_for_update(), pk=club_id, sede_club_id=request.user.sede_usu_id)
+        if club.est_club != 'PENDIENTE_DAE':
+            messages.info(request, 'Este club no está pendiente de revisión DAE.')
+            return redirect('core:perfil')
+        avales = list(club.avales.select_related('estu_aval'))
+        if accion == 'aprobar' and not (len(avales) == 4 and len({a.estu_aval_id for a in avales}) == 4 and all(a.est_aval == 'ACEPTADO' and a.estu_aval.sede_usu_id == club.sede_club_id and a.estu_aval_id != club.lid_club_id for a in avales)):
+            messages.error(request, 'El club debe tener cuatro avales válidos aceptados de su sede.')
+            return redirect('core:perfil')
+        club.est_club = 'APROBADO' if accion == 'aprobar' else 'RECHAZADO'
+        club.save(update_fields=['est_club'])
+        lider = Usuario.objects.select_for_update().get(pk=club.lid_club_id)
+        if accion == 'aprobar' and lider.rol_usu == 'ESTUDIANTE':
+            lider.rol_usu = 'LIDER_ESTUDIANTIL'
+            lider.save(update_fields=['rol_usu'])
+        cuerpo = f'Tu club {club.nom_club} fue {club.est_club.lower()}.'
+        if accion == 'aprobar':
+            cuerpo += ' Ya tienes habilitada la reserva de espacios en tu perfil.'
+        MensajeInbox.objects.create(dest_inbo=lider, tipo_inbo='SISTEMA', club_inbo=club, asun_inbo='Resolución de postulación a club', cuer_inbo=cuerpo)
+        RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Aprobó Club Estudiantil' if accion == 'aprobar' else 'Rechazó Club Estudiantil', det_audi=f'Club #{club.pk}: {club.nom_club}; sede #{club.sede_club_id}; líder #{lider.pk}; estado {club.est_club}')
+    messages.success(request, 'Resolución del club registrada y notificada.')
+    return redirect('core:perfil')
+
+
+# Recibe POST DAE/ADMIN y evento local; bloquea sede, valida solapamiento y registra una única resolución con aviso y auditoría.
+@login_required
+@require_POST
+def aprobar_rechazar_evento(request, evento_id, accion):
+    if request.user.rol_usu not in ('DAE', 'ADMIN') or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Acceso exclusivo para DAE y ADMIN de la sede.')
+    if accion not in ('aprobar', 'rechazar'):
+        return JsonResponse({'error': 'Acción inválida.'}, status=400)
+    with transaction.atomic():
+        Sede.objects.select_for_update().get(pk=request.user.sede_usu_id)
+        evento = get_object_or_404(Evento.objects.select_for_update(), pk=evento_id, sede_even_id=request.user.sede_usu_id)
+        if evento.est_even != 'PENDIENTE_DAE':
+            messages.info(request, 'Este evento ya fue resuelto.')
+            return redirect('core:perfil')
+        if accion == 'aprobar' and conflicto_espacio(evento):
+            messages.error(request, 'Conflicto de espacio: ya existe un evento aprobado en ese espacio y horario.')
+            return redirect('core:perfil')
+        evento.est_even = 'APROBADO' if accion == 'aprobar' else 'RECHAZADO'
+        evento.save(update_fields=['est_even'])
+        MensajeInbox.objects.create(dest_inbo=evento.crea_even, tipo_inbo='SISTEMA', asun_inbo='Resolución de evento', cuer_inbo=f'Tu evento {evento.tit_even} fue {evento.est_even.lower()}.')
+        RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Aprobó Evento' if accion == 'aprobar' else 'Rechazó Evento', det_audi=f'Evento #{evento.pk}: {evento.tit_even}; sede #{evento.sede_even_id}; espacio {evento.esp_even}; fecha {evento.fech_even.isoformat()}; estado {evento.est_even}')
+    messages.success(request, 'Resolución del evento registrada y notificada.')
+    return redirect('core:perfil')
+
+
+# Recibe POST DAE/ADMIN, usuario local y un rol permitido; cambia solo rol_usu y devuelve perfil tras registrar auditoría.
+@login_required
+@require_POST
+def cambiar_rol_usuario(request, usuario_id):
+    if request.user.rol_usu not in ('DAE', 'ADMIN') or not request.user.sede_usu_id:
+        return HttpResponseForbidden('Acceso exclusivo para DAE y ADMIN de la sede.')
+    rol = request.POST.get('rol_usu')
+    if rol not in dict(Usuario._meta.get_field('rol_usu').choices):
+        return JsonResponse({'error': 'Rol inválido.'}, status=400)
+    with transaction.atomic():
+        usuario = get_object_or_404(Usuario.objects.select_for_update(), pk=usuario_id, sede_usu_id=request.user.sede_usu_id)
+        anterior = usuario.rol_usu
+        if anterior != rol:
+            usuario.rol_usu = rol
+            usuario.save(update_fields=['rol_usu'])
+            RegistroAuditoria.objects.create(dae_audi=request.user, acc_audi='Cambió rol de usuario', det_audi=f'Usuario #{usuario.pk} @{usuario.username}; sede #{usuario.sede_usu_id}; {anterior} -> {rol}')
+    messages.success(request, 'Rol actualizado.')
+    return redirect('core:perfil')

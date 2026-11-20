@@ -139,6 +139,6 @@ MAILERS = {
 AUTH_USER_MODEL = 'core.Usuario'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATICFILES_DIRS = [BASE_DIR / 'static', BASE_DIR / 'Galeria']
 LOGIN_URL = 'core:login'
 LOGIN_REDIRECT_URL = 'core:home'

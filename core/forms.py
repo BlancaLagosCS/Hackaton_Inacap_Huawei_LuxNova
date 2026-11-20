@@ -5,7 +5,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.utils import timezone
 
-from .models import CARRERAS_CHOICES, ComentarioForo, PublicacionForo, Sede, Usuario
+from .models import CARRERAS_CHOICES, Club, ComentarioForo, Evento, PublicacionForo, Sede, Usuario
 
 
 # Recibe un RUT con formato libre; valida su dígito Módulo 11 y devuelve cuerpo-DV o un error de formulario.
@@ -147,3 +147,57 @@ class ComentarioForoForm(forms.ModelForm):
         fields = ('cont_come',)
         labels = {'cont_come': 'Tu comentario'}
         widgets = {'cont_come': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Suma tu comentario…', 'aria-label': 'Tu comentario'})}
+
+
+# Recibe una sede y un usuario para el selector; devuelve nombres completos legibles para los pares avalistas.
+class SelectorAvalistas(forms.ModelMultipleChoiceField):
+    # Recibe un usuario del queryset autorizado y devuelve su nombre junto al identificador de cuenta.
+    def label_from_instance(self, obj):
+        return f'{obj.nom_usu or obj.username} (@{obj.username})'
+
+
+# Recibe datos de club y usuario actual; valida exactamente cuatro estudiantes de su sede y devuelve una postulación sin guardar.
+class PostularClubForm(forms.ModelForm):
+    avales = SelectorAvalistas(queryset=Usuario.objects.none(), required=False, label='Selecciona exactamente 4 compañeros', widget=forms.SelectMultiple(attrs={'class': 'form-select', 'size': 6}))
+
+    # Recibe metadatos y define los campos editables del club, sin sede, líder ni estado manipulables.
+    class Meta:
+        model = Club
+        fields = ('nom_club', 'cat_club', 'desc_club')
+        labels = {'nom_club': 'Nombre del club', 'cat_club': 'Categoría', 'desc_club': 'Descripción'}
+        widgets = {'nom_club': forms.TextInput(attrs={'class': 'form-control'}), 'cat_club': forms.Select(attrs={'class': 'form-select'}), 'desc_club': forms.Textarea(attrs={'class': 'form-control', 'rows': 3})}
+
+    # Recibe usuario y argumentos de ModelForm; devuelve selector limitado a estudiantes de su sede, excluyéndolo.
+    def __init__(self, *args, user, **kwargs):
+        super().__init__(*args, **kwargs)
+        if user.sede_usu_id:
+            self.fields['avales'].queryset = Usuario.objects.filter(sede_usu_id=user.sede_usu_id, rol_usu='ESTUDIANTE', is_active=True).exclude(pk=user.pk).order_by('nom_usu', 'username')
+
+    # Recibe la selección validada por queryset y devuelve cuatro pares o un error por cantidad incorrecta.
+    def clean_avales(self):
+        avales = self.cleaned_data['avales']
+        if len(avales) != 4:
+            raise forms.ValidationError('Debes seleccionar exactamente 4 compañeros de tu sede para avalar el club.')
+        return avales
+
+
+ESPACIOS_CHOICES = [(nombre, nombre) for nombre in ('Auditorio Principal', 'Sala Multiuso 101', 'Laboratorio Computación 3', 'Patio Central / Ágora', 'Cancha Deportiva')]
+
+
+# Recibe datos de evento y banner opcional; devuelve una solicitud validada sin permitir elegir creador, sede o aprobación.
+class SolicitarEventoForm(forms.ModelForm):
+    esp_even = forms.ChoiceField(choices=ESPACIOS_CHOICES, label='Espacio institucional', widget=forms.Select(attrs={'class': 'form-select'}))
+
+    # Recibe metadatos de Evento y configura sus campos públicos y fecha local HTML5.
+    class Meta:
+        model = Evento
+        fields = ('tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even')
+        labels = {'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora (Chile)'}
+        widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/*'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
+
+    # Recibe fecha interpretada en la zona local; devuelve una fecha futura o un error de formulario.
+    def clean_fech_even(self):
+        fecha = self.cleaned_data['fech_even']
+        if fecha <= timezone.now():
+            raise forms.ValidationError('La fecha del evento debe estar en el futuro.')
+        return fecha

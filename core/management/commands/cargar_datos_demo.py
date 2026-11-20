@@ -10,7 +10,7 @@ from core.services import notificar_iniciativa
 
 # Define la carga demo; recibe opciones de manage.py y produce sedes, usuarios y eventos reutilizables.
 class Command(BaseCommand):
-    help = 'Carga 3 sedes, 7 cuentas y 2 eventos demo. Las cuentas nuevas usan contraseña 1234.'
+    help = 'Carga 3 sedes, 9 cuentas por rol y datos demo; restablece las credenciales de CREDENCIALES.md.'
 
     # Recibe argumentos de consola; crea datos sin duplicar ni sobrescribir cuentas existentes y devuelve un resumen.
     @transaction.atomic
@@ -19,21 +19,23 @@ class Command(BaseCommand):
         for nombre, direccion in [('INACAP Rancagua', 'Sede Rancagua'), ('INACAP Santiago Centro', 'Sede Santiago Centro'), ('INACAP Maipú', 'Sede Maipú')]:
             sede, _ = Sede.objects.get_or_create(nom_sede=nombre, defaults={'dir_sede': direccion})
             sedes.append(sede)
-        cuentas = [('dae_rancagua', 'DAE', 'Equipo DAE Rancagua'), ('lider_rancagua', 'LIDER_ESTUDIANTIL', 'Líder Rancagua')]
-        cuentas += [(f'est{i}', 'ESTUDIANTE', f'Estudiante Demo {i}') for i in range(1, 6)]
+        cuentas = [
+            ('dae_rancagua', 'DAE', 'Equipo DAE Rancagua', 'dae.rancagua@inacap.cl', 'Dae1234!'),
+            ('lider_rancagua', 'LIDER_ESTUDIANTIL', 'Lider Rancagua', 'lider.rancagua@inacapmail.cl', 'Lider1234!'),
+        ]
+        cuentas += [(f'est{i}', 'ESTUDIANTE', f'Estudiante Demo {i}', f'est{i}@inacapmail.cl', 'Est1234!') for i in range(1, 6)]
+        cuentas += [('root_admin', 'ADMIN', 'Root Demo', 'root.rancagua@inacap.cl', 'Admin1234!'),
+                    ('jefe_informatica', 'JEFATURA', 'Jefatura Demo', 'jefatura.informatica@inacap.cl', 'Jefe1234!')]
         creadas = 0
-        for indice, (username, rol, nombre) in enumerate(cuentas, start=1):
-            correo = f"{username}@{'inacap.cl' if rol == 'DAE' else 'inacapmail.cl'}"
-            usuario, nuevo = Usuario.objects.get_or_create(username=username, defaults={'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': correo, 'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0], 'anio_usu': timezone.localdate().year, 'rol_usu': rol})
-            if nuevo:
-                usuario.set_password('1234')
-                usuario.save()
-                creadas += 1
-            # Actualiza solo los datos sintéticos de estas cuentas demo; conserva sus contraseñas y relaciones.
-            usuario.rut_usu = f'{str(indice) * 8}-{indice}'
-            usuario.carr_usu = CARRERAS_CHOICES[0][0]
-            usuario.corr_usu = correo
-            usuario.save(update_fields=['rut_usu', 'carr_usu', 'corr_usu'])
+        for indice, (username, rol, nombre, correo, clave) in enumerate(cuentas, start=1):
+            usuario, nuevo = Usuario.objects.update_or_create(username=username, defaults={
+                'nom_usu': nombre, 'rut_usu': f'{str(indice) * 8}-{indice}', 'corr_usu': correo,
+                'tel_usu': '+56900000000', 'sede_usu': sedes[0], 'carr_usu': CARRERAS_CHOICES[0][0],
+                'anio_usu': timezone.localdate().year, 'rol_usu': rol, 'is_active': True,
+                'is_staff': username == 'root_admin', 'is_superuser': username == 'root_admin'})
+            usuario.set_password(clave)
+            usuario.save(update_fields=['password'])
+            creadas += int(nuevo)
         lider = Usuario.objects.get(username='lider_rancagua')
         for titulo, alcance, dias, espacio, descripcion in [
             ('Encuentro de clubes · Rancagua', 'SEDE', 7, 'Patio central', 'Conoce a tus compañeros y descubre iniciativas para participar en tu sede.'),
@@ -55,4 +57,4 @@ class Command(BaseCommand):
         for publicacion in PublicacionForo.objects.filter(aut_publ=proponente, etiq_publ='INICIATIVA'):
             cuerpo = f'{publicacion.cont_publ}\n\nContacto del proponente:\nNombre: {proponente.nom_usu}\nCarrera: {proponente.carr_usu}\nCorreo: {proponente.corr_usu}\nTeléfono: {proponente.tel_usu}'
             MensajeInbox.objects.filter(publ_inbo=publicacion, tipo_inbo='INICIATIVA_BUZON').update(cuer_inbo=cuerpo)
-        self.stdout.write(self.style.SUCCESS(f'Demo disponible: 3 sedes, 7 cuentas, 2 eventos, foro y club con 4 solicitudes de aval. Cuentas nuevas: {creadas}. Contraseña inicial demo: 1234.'))
+        self.stdout.write(self.style.SUCCESS(f'Demo disponible: 3 sedes, 9 cuentas, 2 eventos, foro y club con 4 solicitudes de aval. Cuentas nuevas: {creadas}. Credenciales: CREDENCIALES.md.'))
