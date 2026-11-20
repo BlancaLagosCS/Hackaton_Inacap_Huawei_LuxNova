@@ -1,0 +1,18 @@
+<div class="carousel-item {% if forloop.first %}active{% endif %}">
+<article id="evento-{{ evento.pk }}" class="carrusel-actividad">
+  <div class="carrusel-slide">
+    {% if evento.ban_even %}<img class="carrusel-imagen" src="{{ evento.ban_even.url }}" alt="Banner de {{ evento.tit_even }}" {% if not forloop.first %}loading="lazy"{% endif %}>{% else %}<div class="carrusel-placeholder" role="img" aria-label="Actividad de la comunidad INACAP"><span>ENCUÉNTRATE<br>CON TU COMUNIDAD.</span><small>LuxNova · INACAP</small></div>{% endif %}
+    <div class="carrusel-info"><span class="estado-badge {% if pasado %}estado-badge-activo{% else %}estado-badge-proximo{% endif %}">{% if pasado %}FINALIZADO{% elif evento.inscrito %}YA PREINSCRITO{% else %}{{ evento.get_alc_even_display }}{% endif %}</span><h3>{{ evento.tit_even }}</h3><p>{{ evento.desc_even|truncatechars:150 }}</p></div>
+    {% if pasado %}<a class="stretched-link" href="#detallePasado-{{ evento.pk }}" data-bs-toggle="modal" role="button" aria-controls="detallePasado-{{ evento.pk }}"><span class="visually-hidden">Ver detalle de {{ evento.tit_even }}</span></a>{% endif %}
+  </div>
+  <div class="carrusel-pie">
+    <p class="small mb-2">{% include 'partials/rango_evento.html' %}</p><p class="small text-secondary mb-2">{{ evento.sede_even.nom_sede }} · {{ evento.esp_even }}</p>
+    {% if pasado %}<p class="small">{{ evento.total_inscritos }} preinscrito{{ evento.total_inscritos|pluralize }} registrado{{ evento.total_inscritos|pluralize }}</p><button class="btn btn-outline-dark btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#detallePasado-{{ evento.pk }}">Ver detalle del evento</button>
+    {% else %}
+    <p class="small mb-2">{% include 'partials/organizador_evento.html' %}</p>
+    <details class="carrusel-descripcion mb-3"><summary>Leer descripción completa</summary><p class="small mt-2 text-break">{{ evento.desc_even|linebreaksbr }}</p></details>
+    <p class="small">{{ evento.total_inscritos }} preinscrito{{ evento.total_inscritos|pluralize }}</p>
+    {% if user.rol_usu == 'DAE' or user.rol_usu == 'ADMIN' %}{% include 'partials/estadisticas_evento.html' with prefijo_ruts='carrusel-proximos' %}{% else %}<form method="post" action="{% url 'core:preinscripcion' evento.pk %}">{% csrf_token %}<button class="btn {% if evento.inscrito %}btn-outline-dark{% else %}btn-primary{% endif %} w-100">{% if evento.inscrito %}Cancelar pre-inscripción{% else %}Pre-inscribirme{% endif %}</button></form>{% endif %}
+    {% endif %}
+  </div>
+</article></div>

@@ -1,0 +1,8 @@
+<div class="carousel-item {% if forloop.first %}active{% endif %}"><article class="carrusel-actividad">
+  <div class="carrusel-slide">
+    {% if pub.img_publ %}<img class="carrusel-imagen" src="{{ pub.img_publ.url }}" alt="Imagen de {{ pub.tit_publ|default:'iniciativa estudiantil' }}" {% if not forloop.first %}loading="lazy"{% endif %}>{% else %}<div class="carrusel-placeholder iniciativa-placeholder" role="img" aria-label="Iniciativa estudiantil de tu sede"><span>#INICIATIVA<br>TU IDEA IMPORTA.</span><small>LuxNova · INACAP</small></div>{% endif %}
+    <div class="carrusel-info"><span class="estado-badge estado-badge-activo">#INICIATIVA</span><h3>{% if pub.tit_publ %}{{ pub.tit_publ }}{% else %}Iniciativa de {{ pub.aut_publ.nom_usu|default:pub.aut_publ.username }}{% endif %}</h3><p>{{ pub.cont_publ|truncatechars:150 }}</p></div>
+    <a class="stretched-link" href="{% url 'core:foro' %}#pub-{{ pub.id }}"><span class="visually-hidden">Leer y comentar esta iniciativa</span></a>
+  </div>
+  <div class="carrusel-pie"><p class="small text-secondary">{{ pub.aut_publ.nom_usu|default:pub.aut_publ.username }} · {{ pub.fech_publ|date:'d/m/Y' }}</p><p class="small">Las ideas de tu comunidad se conversan en el foro.</p><a class="btn btn-outline-dark btn-sm" href="{% url 'core:foro' %}#pub-{{ pub.id }}">Ver iniciativa y comentar</a></div>
+</article></div>

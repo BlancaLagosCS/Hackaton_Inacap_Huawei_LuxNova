@@ -9,7 +9,8 @@
 <div class="foro-cabecera mb-3"><span class="perfil-sobrelinea">LA VIDA DE TU SEDE</span>{% if user.sede_usu_id %}<a class="btn btn-primary" href="{% url 'core:crear_publicacion' %}">Crear publicación</a>{% endif %}</div>
 {% if user.sede_usu_id %}<div class="foro-publicaciones"><section aria-label="Publicaciones de tu sede">
 {% for publicacion in publicaciones %}
-<article id="publicacion-{{ publicacion.pk }}" class="card event-card event-reveal mb-4">
+<span id="publicacion-{{ publicacion.pk }}" class="ancla-publicacion" aria-hidden="true"></span>
+<article id="pub-{{ publicacion.pk }}" class="card event-card event-reveal mb-4">
 <div class="card-body p-4"><header class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><a href="{% url 'core:ver_perfil' publicacion.aut_publ.pk %}"><strong>{{ publicacion.aut_publ.nom_usu|default:publicacion.aut_publ.username }}</strong></a><span class="badge category-badge ms-2">{{ publicacion.aut_publ.get_rol_usu_display }}</span><div class="text-secondary small mt-1">{{ publicacion.aut_publ.carr_usu }} · <time datetime="{{ publicacion.fech_publ|date:'c' }}">{{ publicacion.fech_publ|date:'d M Y · H:i' }}</time></div></div><span class="badge text-bg-danger align-self-start">{% if publicacion.etiq_publ == 'AHORA_MISMO' %}#AhoraMismo{% elif publicacion.etiq_publ == 'NOTICIA' %}#Noticia{% else %}#Iniciativa{% endif %}</span></header>
 {% if publicacion.tit_publ %}<h2 class="h4">{{ publicacion.tit_publ }}</h2>{% endif %}
 {% if publicacion.img_publ %}<img class="foto-foro rounded mb-3" src="{{ publicacion.img_publ.url }}" alt="Foto de la publicación {{ publicacion.tit_publ }}" loading="lazy">{% endif %}

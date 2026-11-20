@@ -1,0 +1,9 @@
+<div class="modal fade" id="detallePasado-{{ evento.pk }}" tabindex="-1" aria-labelledby="tituloPasado-{{ evento.pk }}" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content modal-actividad">
+<div class="modal-header"><h2 class="modal-title h4" id="tituloPasado-{{ evento.pk }}">{{ evento.tit_even }}</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar detalle"></button></div>
+<div class="modal-body">
+{% if evento.ban_even %}<img class="modal-actividad-imagen mb-3" src="{{ evento.ban_even.url }}" alt="Banner completo de {{ evento.tit_even }}" loading="lazy">{% else %}<div class="carrusel-placeholder rounded mb-3"><span>COMUNIDAD INACAP</span><small>Actividad finalizada</small></div>{% endif %}
+<span class="badge category-badge mb-3">Evento finalizado</span><p class="text-break">{{ evento.desc_even|linebreaksbr }}</p>
+<dl class="event-details"><dt>Fechas</dt><dd>{% include 'partials/rango_evento.html' %}</dd><dt>Sede</dt><dd>{{ evento.sede_even.nom_sede }}</dd><dt>Espacio</dt><dd>{{ evento.esp_even }}</dd></dl>
+<p>{% include 'partials/organizador_evento.html' %}</p><p>{{ evento.total_inscritos }} persona{{ evento.total_inscritos|pluralize }} preinscrita{{ evento.total_inscritos|pluralize }} en esta actividad.</p>
+{% if user.rol_usu == 'DAE' or user.rol_usu == 'ADMIN' %}{% include 'partials/estadisticas_evento.html' with prefijo_ruts='carrusel-pasados' %}{% endif %}
+</div><div class="modal-footer"><button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cerrar detalle</button></div></div></div></div>

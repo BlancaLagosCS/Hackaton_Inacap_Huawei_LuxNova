@@ -5,4 +5,4 @@
 <h3 class="h5 border-top pt-4 mt-4">Datos de la actividad</h3>
 {% for field in form %}{% if field.name != 'esp_even' and field.name != 'mes_reserva' and field.name != 'dia_even' %}<div class="mb-3"><label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<div class="form-text text-muted">{{ field.help_text }}</div>{% endif %}{% for error in field.errors %}<p class="text-danger small" role="alert">{{ error }}</p>{% endfor %}</div>{% endif %}{% endfor %}<button class="btn btn-primary">Enviar solicitud de actividad</button></form></div></section></div>{% endblock %}
 
-{% block extra_js %}<script src="{% static 'js/eventos.js' %}?v=v12-diaria-455f1bcff9d4" defer></script>{% endblock %}
+{% block extra_js %}<script src="{% static 'js/eventos.js' %}?v=v11-carruseles-5e53f909a011" defer></script>{% endblock %}

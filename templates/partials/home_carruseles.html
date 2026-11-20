@@ -1,0 +1,21 @@
+<div class="row g-4 home-carruseles" aria-label="Actividades e iniciativas de la comunidad">
+<section class="col-xl-4" aria-labelledby="tituloProximos"><div class="carrusel-mitad">
+<header class="carrusel-mitad-header"><h2 id="tituloProximos" class="carrusel-titulo">Próximos Eventos</h2><span class="carrusel-estado estado-proximo">{{ eventos_proximos.count }} actividades</span></header>
+<div id="carruselProximos" class="carousel slide" data-bs-interval="false" role="region" aria-roledescription="carrusel" aria-label="Próximos eventos">
+<div class="carousel-inner">{% for evento in eventos_proximos %}{% include 'partials/carrusel_evento_slide.html' with pasado=False %}{% empty %}<div class="carousel-item active"><div class="carrusel-vacio"><h3 class="h5">Lo próximo está por llegar</h3><p>No hay próximos eventos aprobados para mostrar. Vuelve a revisar las actividades de tu comunidad.</p></div></div>{% endfor %}</div>
+{% include 'partials/carrusel_controles.html' with id_carrusel='carruselProximos' total=eventos_proximos.count nombre='próximos eventos' %}
+</div></div></section>
+<section class="col-xl-4" aria-labelledby="tituloIniciativas"><div class="carrusel-mitad">
+<header class="carrusel-mitad-header"><h2 id="tituloIniciativas" class="carrusel-titulo">Iniciativas Estudiantiles</h2><span class="carrusel-estado estado-activo">Ideas</span></header>
+<div id="carruselIniciativas" class="carousel slide" data-bs-interval="false" role="region" aria-roledescription="carrusel" aria-label="Iniciativas estudiantiles">
+<div class="carousel-inner">{% for pub in iniciativas_carrusel %}{% include 'partials/carrusel_iniciativa_slide.html' %}{% empty %}<div class="carousel-item active"><div class="carrusel-vacio"><h3 class="h5">Tu idea puede ser la primera</h3><p>Aún no hay iniciativas publicadas en tu sede.</p><a class="btn btn-outline-dark btn-sm" href="{% url 'core:crear_publicacion' %}">Compartir una iniciativa</a></div></div>{% endfor %}</div>
+{% include 'partials/carrusel_controles.html' with id_carrusel='carruselIniciativas' total=iniciativas_carrusel.count nombre='iniciativas' %}
+</div></div></section>
+<section class="col-xl-4" aria-labelledby="tituloPasados"><div class="carrusel-mitad">
+<header class="carrusel-mitad-header"><h2 id="tituloPasados" class="carrusel-titulo">Eventos Pasados</h2><span class="carrusel-estado estado-proximo">Nuestra historia</span></header>
+<div id="carruselPasados" class="carousel slide" data-bs-interval="false" role="region" aria-roledescription="carrusel" aria-label="Eventos pasados">
+<div class="carousel-inner">{% for evento in eventos_pasados %}{% include 'partials/carrusel_evento_slide.html' with pasado=True %}{% empty %}<div class="carousel-item active"><div class="carrusel-vacio"><h3 class="h5">Encuentros para recordar</h3><p>Todavía no hay eventos finalizados para mostrar.</p></div></div>{% endfor %}</div>
+{% include 'partials/carrusel_controles.html' with id_carrusel='carruselPasados' total=eventos_pasados.count nombre='eventos pasados' %}
+</div></div></section>
+</div>
+{% for evento in eventos_pasados %}{% include 'partials/modal_evento_pasado.html' %}{% endfor %}

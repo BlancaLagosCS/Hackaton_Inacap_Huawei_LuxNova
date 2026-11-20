@@ -1,0 +1,4 @@
+{% if total > 1 %}
+<button class="carousel-control-prev flecha-carrusel prev" type="button" data-bs-target="#{{ id_carrusel }}" data-bs-slide="prev" aria-controls="{{ id_carrusel }}"><span aria-hidden="true">‹</span><span class="visually-hidden">Anterior: {{ nombre }}</span></button>
+<button class="carousel-control-next flecha-carrusel next" type="button" data-bs-target="#{{ id_carrusel }}" data-bs-slide="next" aria-controls="{{ id_carrusel }}"><span aria-hidden="true">›</span><span class="visually-hidden">Siguiente: {{ nombre }}</span></button>
+{% endif %}

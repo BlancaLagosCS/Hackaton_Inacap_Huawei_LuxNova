@@ -1,4 +1,4 @@
 {% extends 'base.html' %}{% load static %}
 {% block titulo_vista %}Disponibilidad de lugares{% endblock %}
 {% block content %}<div class="row justify-content-center"><section class="col-lg-9"><div class="card p-4 p-lg-5"><h2 class="h4">Consulta antes de organizar</h2><p>Los días reservados o con solicitudes en revisión quedan bloqueados para todos en tu sede.</p>{% include 'partials/disponibilidad.html' %}<div class="d-flex flex-wrap gap-2 mt-4">{% if user.rol_usu == 'LIDER_ESTUDIANTIL' or user.rol_usu == 'DELEGADO' or user.rol_usu == 'JEFATURA' or user.rol_usu == 'ADMIN' %}<a class="btn btn-primary" href="{% url 'core:solicitar_evento' %}">Solicitar actividad</a>{% endif %}<a class="btn btn-outline-dark" href="{% url 'core:perfil' %}">Volver a mi perfil</a></div></div></section></div>{% endblock %}
-{% block extra_js %}<script src="{% static 'js/eventos.js' %}?v=v12-diaria-455f1bcff9d4" defer></script>{% endblock %}
+{% block extra_js %}<script src="{% static 'js/eventos.js' %}?v=v11-carruseles-5e53f909a011" defer></script>{% endblock %}

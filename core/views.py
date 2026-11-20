@@ -20,21 +20,32 @@ from .participacion import dashboard_participacion, preparar_estadisticas
 from .reservas import ESPACIOS_CHOICES, conflicto_reserva, disponibilidad_mes, interpretar_mes, texto_reserva, eventos_vigentes
 
 
-# Recibe una petición y devuelve bienvenida o eventos futuros aprobados por alcance y sede.
+# Recibe petición y búsqueda opcional; devuelve bienvenida o carruseles de eventos e iniciativas visibles, conservando el contexto previo.
 def home(request):
     contexto = {}
     busqueda = request.GET.get('q', '').strip()[:200]
     if request.user.is_authenticated:
+        ahora = timezone.now()
         inscripciones = Evento.asis_even.through.objects.filter(evento_id=OuterRef('pk'), usuario_id=request.user.pk)
-        eventos = Evento.objects.filter(eventos_vigentes(), est_even='APROBADO').select_related('sede_even', 'crea_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
+        visibles = Q(alc_even='INTERSEDE')
+        if request.user.sede_usu_id:
+            visibles |= Q(alc_even='SEDE', sede_even_id=request.user.sede_usu_id)
+        eventos = Evento.objects.filter(visibles, est_even='APROBADO').select_related('sede_even', 'crea_even', 'club_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones))
+        iniciativas = PublicacionForo.objects.filter(sede_publ_id=request.user.sede_usu_id, etiq_publ='INICIATIVA').select_related('aut_publ') if request.user.sede_usu_id else PublicacionForo.objects.none()
         if busqueda:
             eventos = eventos.filter(Q(tit_even__icontains=busqueda) | Q(desc_even__icontains=busqueda))
+            iniciativas = iniciativas.filter(Q(tit_publ__icontains=busqueda) | Q(cont_publ__icontains=busqueda))
+        proximos = eventos.filter(Q(ffin_even__gte=ahora) | Q(ffin_even__isnull=True, fech_even__gte=ahora)).order_by('fech_even', 'pk')
+        pasados = eventos.filter(Q(ffin_even__lt=ahora) | Q(ffin_even__isnull=True, fech_even__lt=ahora)).order_by('-fech_even', '-pk')
         clubes = Club.objects.filter(sede_club_id=request.user.sede_usu_id, est_club='APROBADO').select_related('lid_club') if request.user.sede_usu_id else Club.objects.none()
         if busqueda:
             clubes = clubes.filter(Q(nom_club__icontains=busqueda) | Q(desc_club__icontains=busqueda))
-        contexto = {'eventos_sede': eventos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(), 'eventos_intersede': eventos.filter(alc_even='INTERSEDE'), 'clubes_activos': clubes}
+        contexto = {'eventos_sede': proximos.filter(alc_even='SEDE', sede_even=request.user.sede_usu) if request.user.sede_usu_id else eventos.none(),
+            'eventos_intersede': proximos.filter(alc_even='INTERSEDE'), 'clubes_activos': clubes,
+            'eventos_proximos': proximos, 'eventos_pasados': pasados,
+            'iniciativas_carrusel': iniciativas.order_by('-fech_publ', '-pk')}
         if request.user.rol_usu in ('DAE', 'ADMIN'):
-            for clave in ('eventos_sede', 'eventos_intersede'):
+            for clave in ('eventos_sede', 'eventos_intersede', 'eventos_proximos', 'eventos_pasados'):
                 contexto[clave] = preparar_estadisticas(request, contexto[clave].prefetch_related('asis_even'))
     return render(request, 'home.html', contexto)
 
