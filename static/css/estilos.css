@@ -131,6 +131,20 @@ body a { color: #FFFFFF; }
 .foro-filtros, .foro-cabecera { max-width: 850px; margin-inline: auto; }
 .foro-filtros .btn { padding: .5rem .65rem; font-size: .8rem; line-height: 1.2; }
 .foro-publicaciones { max-width: 850px; margin-inline: auto; }
+.calendario-leyenda { display: flex; gap: 1rem; flex-wrap: wrap; }
+.dia-muestra { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; margin-right: .25rem; }
+.dia-muestra.disponible { background: #D5EBD9; }.dia-muestra.revision { background: #FFE7AC; }.dia-muestra.reservado { background: #E9A0A2; }
+.calendario-reserva { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .4rem; max-width: 580px; }
+.calendario-reserva[hidden] { display: none; }
+.calendario-semana { text-align: center; font-size: .8rem; color: #555; }
+.calendario-dia { border: 1px solid #CDDCCE; background: #EAF5EC; color: #234C2C; min-height: 40px; border-radius: 8px; padding: .4rem 0; }
+.calendario-dia.en_revision { background: #FFF0CD; border-color: #CDA645; color: #75530C; }
+.calendario-dia.reservado { background: #FBE4E5; border-color: #E9A0A2; color: #9D1916; text-decoration: line-through; }
+.calendario-dia.pasado { background: #F2F2F2; color: #999; border-color: #EEE; }
+.calendario-dia.seleccionado { background: #E61E28; border-color: #E61E28; color: white; box-shadow: 0 0 0 2px #1A1A1A; }
+.dm-avales { max-height: 60%; overflow-y: auto; flex-shrink: 0; padding: .8rem; background: #FFF7E8; border-bottom: 1px solid #E4D5B7; }
+.dm-avales[hidden] { display: none; }
+.dm-aval-tarjeta { padding: .6rem 0; border-top: 1px solid #E4D5B7; }
 @media (max-width: 600px) { .foro-cabecera { flex-wrap: wrap; gap: .6rem; } }
 .perfil-identidad { display: flex; gap: 1.25rem; align-items: center; }
 .perfil-identidad .avatar-perfil { flex-shrink: 0; width: 94px; height: 94px; }

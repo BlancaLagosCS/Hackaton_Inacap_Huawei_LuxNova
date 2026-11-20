@@ -35,7 +35,7 @@ class ComunidadV11Tests(TestCase):
     # Recibe campos opcionales; devuelve un formulario de evento futuro a título personal.
     def datos_evento(self, **cambios):
         inicio = timezone.localtime(timezone.now() + timedelta(days=6))
-        datos = {'orga_even': 'PERSONAL', 'tit_even': 'Evento comunidad', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'fech_even': inicio.strftime('%Y-%m-%dT%H:%M'), 'ffin_even': (inicio + timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M')}
+        datos = {'orga_even': 'PERSONAL', 'tit_even': 'Evento comunidad', 'desc_even': 'Demo', 'cat_even': 'TODO_PUBLICO', 'alc_even': 'SEDE', 'esp_even': 'Auditorio Principal', 'dia_even': inicio.date().isoformat(), 'mes_reserva': inicio.strftime('%Y-%m')}
         return {**datos, **cambios}
 
     # Recibe campos opcionales; devuelve un evento de club aprobado con fechas pasadas o futuras para verificar historial.

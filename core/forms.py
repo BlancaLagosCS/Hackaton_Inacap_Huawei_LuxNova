@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth import authenticate
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.utils import timezone
+from .reservas import ESPACIOS_CHOICES, disponibilidad_mes, interpretar_mes, intervalo_dia, conflicto_reserva
 
 from .models import CARRERAS_CHOICES, Club, ComentarioForo, Evento, PublicacionForo, Sede, Usuario
 
@@ -297,26 +298,35 @@ class PostularClubForm(forms.ModelForm):
         return avales
 
 
-ESPACIOS_CHOICES = [(nombre, nombre) for nombre in ('Auditorio Principal', 'Sala Multiuso 101', 'Laboratorio Computación 3', 'Patio Central / Ágora', 'Cancha Deportiva')]
-
-
-# Recibe datos de evento y banner opcional; devuelve una solicitud validada sin permitir elegir creador, sede o aprobación.
+# Recibe lugar, mes, día y actividad; devuelve una reserva diaria validada sin permitir elegir creador, sede o aprobación.
 class SolicitarEventoForm(forms.ModelForm):
     club_even = forms.ModelChoiceField(queryset=Club.objects.none(), required=False, label='Club responsable', empty_label='Selecciona el club responsable', widget=forms.Select(attrs={'class': 'form-select'}))
-    esp_even = forms.ChoiceField(choices=ESPACIOS_CHOICES, label='Espacio institucional', widget=forms.Select(attrs={'class': 'form-select'}))
-    ffin_even = forms.DateTimeField(label='Fecha y hora de término', required=True, widget=forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'}))
+    esp_even = forms.ChoiceField(choices=[('', 'Selecciona el lugar que quieres reservar')] + ESPACIOS_CHOICES, label='Espacio institucional', widget=forms.Select(attrs={'class': 'form-select'}))
+    mes_reserva = forms.DateField(label='Mes de la reserva', input_formats=['%Y-%m'], widget=forms.DateInput(format='%Y-%m', attrs={'type': 'month', 'class': 'form-control'}))
+    dia_even = forms.DateField(label='Día disponible', input_formats=['%Y-%m-%d'], widget=forms.Select(attrs={'class': 'form-select'}))
 
-    # Recibe metadatos de Evento y configura sus campos públicos y fecha local HTML5.
+    # Recibe metadatos de Evento; expone lugar/día primero y conserva fechas internas fuera del formulario.
     class Meta:
         model = Evento
-        fields = ('orga_even', 'club_even', 'tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even', 'ffin_even')
-        labels = {'orga_even': '¿En calidad de qué organizas este evento?', 'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora de inicio'}
+        fields = ('esp_even', 'mes_reserva', 'dia_even', 'orga_even', 'club_even', 'tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even')
+        labels = {'orga_even': '¿En calidad de qué organizas este evento?', 'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance'}
         help_texts = {'ban_even': 'Tamaño recomendado: 1200 × 400 px (formato banner horizontal 3:1, JPG o PNG, máx. 3 MB).'}
-        widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
+        widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'})}
 
     # Recibe al organizador y datos opcionales; ofrece exclusivamente clubes aprobados que lidera en su sede.
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.usuario = user
+        mes_texto = self.data.get('mes_reserva') if self.is_bound else None
+        try:
+            mes = interpretar_mes(mes_texto)
+        except (TypeError, ValueError):
+            mes = interpretar_mes(None)
+        self.fields['mes_reserva'].initial = mes.strftime('%Y-%m')
+        self.fields['mes_reserva'].widget.attrs['min'] = timezone.localdate().strftime('%Y-%m')
+        espacio = self.data.get('esp_even', '') if self.is_bound else ''
+        disponibles = disponibilidad_mes(user.sede_usu_id, espacio, mes)['disponibles'] if user and user.sede_usu_id and espacio in dict(ESPACIOS_CHOICES) else []
+        self.fields['dia_even'].widget.choices = [('', 'Selecciona primero un lugar y un día libre')] + [(d, f'{d[8:10]}/{d[5:7]}/{d[:4]}') for d in disponibles]
         self.fields['orga_even'].widget.attrs['class'] = 'form-select'
         rol = {'LIDER_ESTUDIANTIL': 'líder estudiantil', 'DELEGADO': 'delegado', 'JEFATURA': 'jefatura de carrera', 'ADMIN': 'administrador'}.get(user.rol_usu if user else '', 'organizador')
         self.fields['orga_even'].choices = [('', 'Selecciona cómo organizas el evento'), ('PERSONAL', f'Como {rol} (a título personal)'), ('CLUB', 'En nombre de un club estudiantil')]
@@ -330,19 +340,24 @@ class SolicitarEventoForm(forms.ModelForm):
     def clean_ban_even(self):
         return validar_imagen_subida(self.cleaned_data.get('ban_even'), 3)
 
-    # Recibe fecha interpretada en la zona local; devuelve una fecha futura o un error de formulario.
-    def clean_fech_even(self):
-        fecha = self.cleaned_data['fech_even']
-        if fecha <= timezone.now():
-            raise forms.ValidationError('La fecha del evento debe estar en el futuro.')
-        return fecha
-
-    # Recibe los campos ya interpretados en hora local; devuelve datos limpios o un error si el término no supera el inicio.
+    # Recibe día y representación; valida disponibilidad actual y configura los extremos internos del día completo.
     def clean(self):
         datos = super().clean()
-        inicio, termino = datos.get('fech_even'), datos.get('ffin_even')
-        if inicio and termino and termino <= inicio:
-            raise forms.ValidationError('La fecha y hora de término debe ser posterior a la de inicio.')
+        dia, mes, espacio = datos.get('dia_even'), datos.get('mes_reserva'), datos.get('esp_even')
+        if dia:
+            if dia.year == 9999:
+                self.add_error('dia_even', 'Selecciona un día válido.')
+            elif dia < timezone.localdate():
+                self.add_error('dia_even', 'Selecciona un día de hoy en adelante.')
+            elif mes and (dia.year, dia.month) != (mes.year, mes.month):
+                self.add_error('dia_even', 'El día debe pertenecer al mes seleccionado.')
+            else:
+                self.instance.fech_even, self.instance.ffin_even = intervalo_dia(dia)
+                self.instance.esp_even = espacio or ''
+                if self.usuario:
+                    self.instance.sede_even_id = self.usuario.sede_usu_id
+                if espacio and self.usuario and conflicto_reserva(self.instance):
+                    self.add_error('dia_even', 'Este lugar ya está reservado o en revisión para ese día. Elige otro día disponible.')
         if datos.get('orga_even') == 'CLUB' and not datos.get('club_even'):
             self.add_error('club_even', 'Selecciona el club aprobado responsable del evento.')
         if datos.get('orga_even') == 'PERSONAL' and datos.get('club_even'):

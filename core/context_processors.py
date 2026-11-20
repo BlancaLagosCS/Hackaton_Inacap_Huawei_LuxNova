@@ -11,7 +11,7 @@ def inbox_contador(request):
                'configuracion_perfil': 'Configuración de cuenta', 'postular_club': 'Solicitar creación de club estudiantil',
                'crear_cuenta_institucional': 'Crear cuenta institucional', 'gestion_perfil': 'Mi panel de gestión',
                'organizacion_perfil': 'Eventos que estoy organizando', 'mensajes': 'Mensajes', 'solicitar_evento': 'Crear evento',
-               'crear_publicacion': 'Publicar en el foro', 'clubes': 'Clubes de tu sede', 'detalle_club': 'Club estudiantil', 'mis_clubes': 'Mis clubes'}
+               'crear_publicacion': 'Publicar en el foro', 'clubes': 'Clubes de tu sede', 'detalle_club': 'Club estudiantil', 'mis_clubes': 'Mis clubes', 'espacios': 'Disponibilidad de lugares'}
     if nombre == 'postular_club' and request.user.is_authenticated:
         titulos[nombre] = 'Postular a líder' if request.user.rol_usu == 'ESTUDIANTE' else 'Crear otro club estudiantil'
     return {'inbox_no_leidos': total, 'puede_buzon': puede_buzon, 'titulo_vista_default': titulos.get(nombre, 'INACAP Smart'),

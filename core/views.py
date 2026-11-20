@@ -17,6 +17,7 @@ from .models import AvalClub, Club, ComentarioForo, Evento, MembresiaClub, Mensa
 from .services import notificar_iniciativa, notificar_solicitud_aval, resolver_aval
 from .utils import enviar_notificacion_sistema
 from .participacion import dashboard_participacion, preparar_estadisticas
+from .reservas import ESPACIOS_CHOICES, conflicto_reserva, disponibilidad_mes, interpretar_mes, texto_reserva, eventos_vigentes
 
 
 # Recibe una petición y devuelve bienvenida o eventos futuros aprobados por alcance y sede.
@@ -25,7 +26,7 @@ def home(request):
     busqueda = request.GET.get('q', '').strip()[:200]
     if request.user.is_authenticated:
         inscripciones = Evento.asis_even.through.objects.filter(evento_id=OuterRef('pk'), usuario_id=request.user.pk)
-        eventos = Evento.objects.filter(est_even='APROBADO', fech_even__gte=timezone.now()).select_related('sede_even', 'crea_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
+        eventos = Evento.objects.filter(eventos_vigentes(), est_even='APROBADO').select_related('sede_even', 'crea_even').annotate(total_inscritos=Count('asis_even'), inscrito=Exists(inscripciones)).order_by('fech_even')
         if busqueda:
             eventos = eventos.filter(Q(tit_even__icontains=busqueda) | Q(desc_even__icontains=busqueda))
         clubes = Club.objects.filter(sede_club_id=request.user.sede_usu_id, est_club='APROBADO').select_related('lid_club') if request.user.sede_usu_id else Club.objects.none()
@@ -78,7 +79,7 @@ def preinscripcion(request, evento_id):
     if request.user.rol_usu in ('DAE', 'ADMIN'):
         return HttpResponseForbidden('Tu rol consulta la participación y no se preinscribe en eventos.')
     with transaction.atomic():
-        evento = get_object_or_404(Evento.objects.select_for_update().filter(Q(alc_even='INTERSEDE') | Q(alc_even='SEDE', sede_even_id=request.user.sede_usu_id)), pk=evento_id, est_even='APROBADO', fech_even__gte=timezone.now())
+        evento = get_object_or_404(Evento.objects.select_for_update().filter(eventos_vigentes()).filter(Q(alc_even='INTERSEDE') | Q(alc_even='SEDE', sede_even_id=request.user.sede_usu_id)), pk=evento_id, est_even='APROBADO')
         if evento.asis_even.filter(pk=request.user.pk).exists():
             evento.asis_even.remove(request.user)
             messages.success(request, 'Preinscripción cancelada.')
@@ -204,16 +205,14 @@ def resumen_perfil(visitante, perfil_usuario):
     if perfil_usuario.rol_usu not in ROLES_GESTION:
         return None
     eventos = Evento.objects.filter(crea_even=perfil_usuario, est_even='APROBADO')
-    evento = eventos.filter(fech_even__gte=timezone.now()).order_by('fech_even', 'pk').first() or eventos.order_by('-fech_even', '-pk').first()
+    evento = eventos.filter(eventos_vigentes()).order_by('fech_even', 'pk').first() or eventos.order_by('-fech_even', '-pk').first()
     if not evento:
         return None
     asistentes = [{'nombre': u.nom_usu or u.username, 'carrera': u.carr_usu,
                    'telefono': u.tel_usu if puede_ver_contacto(visitante, u) else None,
                    'url': reverse('core:ver_perfil', args=[u.pk])}
                   for u in evento.asis_even.order_by('nom_usu', 'pk')]
-    inicio = timezone.localtime(evento.fech_even).strftime('%d/%m/%Y %H:%M')
-    termino = timezone.localtime(evento.ffin_even).strftime('%d/%m/%Y %H:%M') if evento.ffin_even else 'Sin definir'
-    return {'titulo': evento.tit_even, 'fecha': f'Inicio: {inicio} — Término: {termino}',
+    return {'titulo': evento.tit_even, 'fecha': texto_reserva(evento),
             'total': len(asistentes), 'asistentes': asistentes}
 
 
@@ -236,8 +235,8 @@ def mostrar_perfil(request, perfil_usuario):
         'publicaciones_perfil': PublicacionForo.objects.filter(aut_publ=perfil_usuario, sede_publ_id=request.user.sede_usu_id).order_by('-fech_publ') if request.user.sede_usu_id else PublicacionForo.objects.none(),
         'publicaciones_count': PublicacionForo.objects.filter(aut_publ=perfil_usuario, sede_publ_id=request.user.sede_usu_id).count() if request.user.sede_usu_id else 0,
         'resumen': resumen,
-        'proximos_inscritos': asistidos.filter(fech_even__gte=timezone.now()).order_by('fech_even'),
-        'historial_inscritos': asistidos.filter(fech_even__lt=timezone.now()),
+        'proximos_inscritos': asistidos.filter(eventos_vigentes()).order_by('fech_even'),
+        'historial_inscritos': asistidos.filter(~eventos_vigentes()),
         'puede_organizar': request.user.pk == perfil_usuario.pk and perfil_usuario.rol_usu in ROLES_EVENTO,
         'puede_gestionar': request.user.pk == perfil_usuario.pk and (perfil_usuario.rol_usu in ROLES_GESTION or puede_crear_cuentas(request.user)),
         'organizando_total': Evento.objects.filter(crea_even=perfil_usuario).count(),
@@ -282,10 +281,9 @@ def contexto_gestion(request):
     return contexto
 
 
-# Recibe un evento con intervalo válido; devuelve si solapa otra reserva aprobada local o una reserva histórica sin término conocido.
+# Recibe un evento; devuelve si otro aprobado o pendiente ocupa sus mismos días, sede y espacio normalizado.
 def conflicto_espacio(evento):
-    return Evento.objects.filter(sede_even_id=evento.sede_even_id, esp_even__iexact=evento.esp_even.strip(), est_even='APROBADO',
-        fech_even__lt=evento.ffin_even).filter(Q(ffin_even__gt=evento.fech_even) | Q(ffin_even__isnull=True)).exclude(pk=evento.pk).exists()
+    return conflicto_reserva(evento)
 
 
 # Recibe GET/POST de estudiante o líder; guarda club y cuatro solicitudes DM atómicamente y devuelve su página con estados/errores.
@@ -332,8 +330,8 @@ def solicitar_evento(request):
             evento.crea_even = request.user
             evento.est_even = 'PENDIENTE_DAE'
             directo = request.user.rol_usu in ('DAE', 'ADMIN')
-            if directo and conflicto_espacio(evento):
-                form.add_error('fech_even', 'Conflicto de espacio: ya existe un evento aprobado en ese espacio y horario.')
+            if conflicto_espacio(evento):
+                form.add_error('dia_even', 'Este lugar ya está reservado o en revisión para ese día. Elige otro día disponible.')
             else:
                 if directo:
                     evento.est_even = 'APROBADO'
@@ -398,7 +396,7 @@ def aprobar_rechazar_evento(request, evento_id, accion):
             messages.error(request, 'El evento necesita una fecha de término posterior al inicio antes de aprobarse.')
             return redirect('core:gestion_perfil')
         if accion == 'aprobar' and conflicto_espacio(evento):
-            messages.error(request, 'Conflicto de espacio: ya existe un evento aprobado en ese espacio y horario.')
+            messages.error(request, 'Conflicto de espacio: el lugar ya está reservado o en revisión para ese día. Resuelve la solicitud que lo bloquea antes de aprobar.')
             return redirect('core:gestion_perfil')
         evento.est_even = 'APROBADO' if accion == 'aprobar' else 'RECHAZADO'
         evento.save(update_fields=['est_even'])
@@ -512,7 +510,37 @@ def mensajes(request):
         return JsonResponse({'error': 'Usuario inválido.'}, status=400)
     if destino:
         get_object_or_404(Usuario.objects.filter(is_active=True).exclude(pk=request.user.pk), pk=int(destino))
-    return render(request, 'mensajes.html', {'dm_destino_id': destino})
+    return render(request, 'mensajes.html', {'dm_destino_id': destino, 'avales_pendientes': avales_por_responder(request.user)})
+
+
+# Recibe usuario autenticado; devuelve sus avales aún respondibles sin depender del límite del historial DM.
+def avales_por_responder(usuario):
+    return AvalClub.objects.filter(estu_aval=usuario, est_aval='PENDIENTE', club_aval__est_club='PENDIENTE_AVALES', club_aval__sede_club_id=usuario.sede_usu_id).exclude(club_aval__lid_club=usuario).select_related('club_aval__lid_club').order_by('pk') if usuario.sede_usu_id else AvalClub.objects.none()
+
+
+# Recibe GET autenticado; muestra la disponibilidad a estudiantes, organizadores y DAE sin crear solicitudes.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def espacios_disponibles(request):
+    return render(request, 'espacios.html', {'form': SolicitarEventoForm(user=request.user)})
+
+
+# Recibe GET con espacio y mes; devuelve calendario de su sede sin nombres de actividades ni datos de otras sedes.
+@login_required
+@never_cache
+@require_http_methods(['GET'])
+def disponibilidad_espacio(request):
+    if not request.user.sede_usu_id:
+        return JsonResponse({'error': 'Necesitas una sede asignada para consultar lugares.'}, status=403)
+    espacio = request.GET.get('espacio', '')
+    try:
+        mes = interpretar_mes(request.GET.get('mes'))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Selecciona un mes válido.'}, status=400)
+    if espacio not in dict(ESPACIOS_CHOICES):
+        return JsonResponse({'error': 'Selecciona un lugar del catálogo.'}, status=400)
+    return JsonResponse(disponibilidad_mes(request.user.sede_usu_id, espacio, mes))
 
 
 # Recibe GET autenticado; muestra clubes aprobados de su sede con contador activo y estado de membresía propia.
@@ -609,7 +637,8 @@ def dm_conversaciones(request):
         oficial_orden=Case(When(username='sistema', then=Value(0)), default=Value(1), output_field=IntegerField())).select_related('sede_usu').order_by('oficial_orden', '-ultimo_fecha', 'pk')[:100]
     no_leidos = MensajeDirecto.objects.filter(rec_mens=request.user, leid_mens=False)
     conteos = {fila['emi_mens_id']: fila['total'] for fila in no_leidos.values('emi_mens_id').annotate(total=Count('pk'))}
-    return JsonResponse({'no_leidos': no_leidos.count(), 'conversaciones': [{**usuario_json(u), 'extracto': (u.ultimo_texto or 'Canal oficial de notificaciones')[:100], 'fecha': u.ultimo_fecha.isoformat() if u.ultimo_fecha else None, 'no_leidos': conteos.get(u.pk, 0)} for u in usuarios]})
+    pendientes = avales_por_responder(request.user).count()
+    return JsonResponse({'no_leidos': no_leidos.count(), 'avales_pendientes': pendientes, 'conversaciones': [{**usuario_json(u), 'extracto': (f'{pendientes} solicitudes de aval por responder' if u.username == 'sistema' and pendientes else (u.ultimo_texto or 'Canal oficial de notificaciones')[:100]), 'fecha': u.ultimo_fecha.isoformat() if u.ultimo_fecha else None, 'no_leidos': conteos.get(u.pk, 0)} for u in usuarios]})
 
 
 # Recibe GET autenticado e ID de interlocutor; devuelve solo los últimos 100 mensajes entre ese usuario y el solicitante.
@@ -619,7 +648,14 @@ def dm_conversaciones(request):
 def dm_hilo(request, usuario_id):
     interlocutor = get_object_or_404(Usuario.objects.select_related('sede_usu').exclude(pk=request.user.pk), pk=usuario_id)
     mensajes = MensajeDirecto.objects.filter(Q(emi_mens=request.user, rec_mens=interlocutor) | Q(emi_mens=interlocutor, rec_mens=request.user)).select_related('aval_mens__club_aval', 'emi_mens').order_by('-pk')[:100]
-    return JsonResponse({'usuario': usuario_json(interlocutor), 'mensajes': [mensaje_dm_json(m, request.user) for m in reversed(list(mensajes))]})
+    return JsonResponse({'usuario': usuario_json(interlocutor), 'mensajes': [mensaje_dm_json(m, request.user) for m in reversed(list(mensajes))],
+        'avales_pendientes': [aval_dm_json(a) for a in avales_por_responder(request.user)] if interlocutor.username == 'sistema' else []})
+
+
+# Recibe un aval autorizado para su destinatario; devuelve acciones y estado sin identificar a los otros avalistas.
+def aval_dm_json(aval):
+    return {'id': aval.pk, 'club': aval.club_aval.nom_club, 'solicitante': aval.club_aval.lid_club.nom_usu or aval.club_aval.lid_club.username,
+        'estado': aval.est_aval, 'pendiente': aval.est_aval == 'PENDIENTE' and aval.club_aval.est_club == 'PENDIENTE_AVALES', 'url': reverse('core:responder_aval', args=[aval.pk])}
 
 
 # Recibe mensaje autorizado del hilo y su lector; devuelve texto seguro y acciones de aval solo al destinatario del canal oficial.
@@ -627,7 +663,7 @@ def mensaje_dm_json(mensaje, lector):
     datos = {'id': mensaje.pk, 'propio': mensaje.emi_mens_id == lector.pk, 'contenido': mensaje.cont_mens, 'leido': mensaje.leid_mens, 'fecha': mensaje.fech_mens.isoformat()}
     aval = mensaje.aval_mens
     if aval and mensaje.emi_mens.username == 'sistema' and mensaje.rec_mens_id == lector.pk and aval.estu_aval_id == lector.pk:
-        datos['aval'] = {'id': aval.pk, 'club': aval.club_aval.nom_club, 'estado': aval.est_aval, 'pendiente': aval.est_aval == 'PENDIENTE' and aval.club_aval.est_club == 'PENDIENTE_AVALES', 'url': reverse('core:responder_aval', args=[aval.pk])}
+        datos['aval'] = aval_dm_json(aval)
     return datos
 
 

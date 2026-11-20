@@ -1,0 +1,8 @@
+<section id="disponibilidad" data-url="{% url 'core:disponibilidad_espacio' %}" aria-label="Disponibilidad del lugar">
+  <div class="mb-3"><label class="form-label fw-semibold" for="{{ form.esp_even.id_for_label }}">1. Lugar que quieres reservar</label>{{ form.esp_even }}{% for error in form.esp_even.errors %}<p class="text-danger small" role="alert">{{ error }}</p>{% endfor %}</div>
+  <div class="row g-3"><div class="col-md-5"><label class="form-label fw-semibold" for="{{ form.mes_reserva.id_for_label }}">2. Mes</label>{{ form.mes_reserva }}{% for error in form.mes_reserva.errors %}<p class="text-danger small" role="alert">{{ error }}</p>{% endfor %}</div><div class="col-md-7"><label class="form-label fw-semibold" for="{{ form.dia_even.id_for_label }}">3. Día disponible</label>{{ form.dia_even }}{% for error in form.dia_even.errors %}<p class="text-danger small" role="alert">{{ error }}</p>{% endfor %}</div></div>
+  <p id="disponibilidad-estado" class="small text-secondary mt-3" role="status">Selecciona un lugar para consultar sus días libres. Las reservas son por día completo.</p>
+  <div class="calendario-leyenda small mb-3"><span><i class="dia-muestra disponible" aria-hidden="true"></i> Disponible</span><span><i class="dia-muestra revision" aria-hidden="true"></i> En revisión</span><span><i class="dia-muestra reservado" aria-hidden="true"></i> Reservado</span></div>
+  <div id="calendario-reserva" class="calendario-reserva" aria-label="Calendario del lugar" hidden></div>
+  <noscript><p class="small">Activa JavaScript para consultar el calendario. Al enviar, el servidor comprobará nuevamente si el día está libre.</p></noscript>
+</section>

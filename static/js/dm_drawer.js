@@ -22,7 +22,11 @@ async function dmMostrar(usuarioId = null) {
       const datos = await lnJSON(dmURL(usuarioId));
       await dmAbrirHilo(datos.usuario);
     }
-    await dmActualizar();
+    const conversaciones = await dmCargarConversaciones();
+    if (!dmEstado.usuario && dmEstado.pendientes > 0) {
+      const sistema = conversaciones.find(dmEsOficial);
+      if (sistema) await dmAbrirHilo(sistema);
+    } else if (dmEstado.usuario) await dmCargarHilo();
   } catch (error) { document.getElementById('dm-estado').textContent = error.message; }
 }
 
@@ -126,6 +130,7 @@ function dmBotonAval(aval, decision, etiqueta) {
 
 // Recibe un perfil público; selecciona ese hilo, configura el bloqueo oficial y devuelve una promesa de carga de mensajes.
 async function dmAbrirHilo(usuario) {
+  dmPintarAvales([]);
   dmEstado.usuario = usuario;
   dmDrawer.classList.add('dm-hilo-abierto');
   document.getElementById('dm-nombre').textContent = `${usuario.nom_usu || usuario.username} · @${usuario.username}${usuario.oficial ? ' ✓ Oficial' : ''}`;
@@ -135,6 +140,7 @@ async function dmAbrirHilo(usuario) {
   document.getElementById('dm-avatar').replaceChildren(lnAvatar(usuario));
   document.getElementById('dm-texto').disabled = usuario.oficial;
   document.getElementById('dm-enviar-boton').disabled = usuario.oficial;
+  document.getElementById('dm-enviar').classList.toggle('d-none', usuario.oficial);
   document.getElementById('dm-texto').value = '';
   document.getElementById('dm-canal-oficial').hidden = !usuario.oficial;
   document.getElementById('dm-estado').textContent = '';
@@ -151,6 +157,7 @@ async function dmCargarHilo(forzarScroll = false) {
   const id = dmEstado.usuario.id;
   const datos = await lnJSON(dmURL(id));
   if (!dmEstado.usuario || dmEstado.usuario.id !== id || !dmDrawer.classList.contains('show')) return;
+  dmPintarAvales(datos.avales_pendientes || []);
   const caja = document.getElementById('dm-mensajes');
   const alFinal = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 70;
   const posicion = caja.scrollTop;
@@ -167,6 +174,29 @@ async function dmCargarHilo(forzarScroll = false) {
   }
 }
 
+// Recibe avales pendientes autorizados; los fija encima del historial, incluso si el mensaje original es antiguo.
+function dmPintarAvales(avales) {
+  const panel = document.getElementById('dm-avales');
+  panel.hidden = avales.length === 0;
+  const firma = JSON.stringify(avales);
+  if (panel.dataset.firma === firma) return;
+  panel.dataset.firma = firma;
+  panel.replaceChildren();
+  if (!avales.length) return;
+  const titulo = document.createElement('h3');
+  titulo.className = 'h6'; titulo.textContent = `Solicitudes de aval pendientes (${avales.length})`;
+  panel.append(titulo);
+  for (const aval of avales) {
+    const tarjeta = document.createElement('article'); tarjeta.className = 'dm-aval-tarjeta';
+    const nombre = document.createElement('strong'); nombre.textContent = aval.club;
+    const detalle = document.createElement('p'); detalle.className = 'small mb-2';
+    detalle.textContent = `${aval.solicitante} solicita tu apoyo para crear este club.`;
+    const acciones = document.createElement('div'); acciones.className = 'd-flex flex-wrap gap-2';
+    acciones.append(dmBotonAval(aval, 'ACEPTADO', 'Aceptar aval'), dmBotonAval(aval, 'RECHAZADO', 'Rechazar aval'));
+    tarjeta.append(nombre, detalle, acciones); panel.append(tarjeta);
+  }
+}
+
 // Recibe un mensaje; devuelve si fue enviado por el usuario actual y su destinatario ya lo leyó.
 function dmEsPropioLeido(mensaje) { return mensaje.propio && mensaje.leido; }
 
@@ -176,6 +206,7 @@ function dmEsRecibidoPendiente(mensaje) { return !mensaje.propio && !mensaje.lei
 // No recibe argumentos; actualiza badge y lista ordenada recibida del servidor y devuelve sus perfiles en una promesa.
 async function dmCargarConversaciones() {
   const datos = await lnJSON(dmConfig.dataset.conversacionesUrl);
+  dmEstado.pendientes = datos.avales_pendientes || 0;
   const badge = document.getElementById('dm-no-leidos');
   badge.hidden = datos.no_leidos === 0;
   badge.textContent = datos.no_leidos;
@@ -203,6 +234,9 @@ async function dmCargarConversaciones() {
   return datos.conversaciones;
 }
 
+// Recibe un perfil público de conversación; devuelve si corresponde al canal oficial del sistema.
+function dmEsOficial(usuario) { return usuario.oficial; }
+
 // No recibe argumentos; actualiza cada cinco segundos con página visible, evita consultas simultáneas y devuelve una promesa.
 async function dmActualizar() {
   if (document.hidden || dmEstado.ocupado) return;
@@ -226,14 +260,6 @@ async function dmEnviarMensaje(evento) {
   const id = dmEstado.usuario.id;
   dmEstado.enviando = true;
   document.getElementById('dm-enviar-boton').disabled = true;
-  document.getElementById('dm-nombre').textContent = 'Selecciona una conversación';
-  document.getElementById('dm-perfil').removeAttribute('href');
-  document.getElementById('dm-avatar').replaceChildren();
-  document.getElementById('dm-mensajes').replaceChildren();
-  document.getElementById('dm-texto').value = '';
-  document.getElementById('dm-canal-oficial').hidden = true;
-  document.getElementById('dm-estado').textContent = '';
-  document.getElementById('dm-buscar').focus();
   try {
     await dmPOST(dmURL(id, 'enviar/'), { cont_mens: texto });
     if (dmEstado.usuario && dmEstado.usuario.id === id) { entrada.value = ''; await dmCargarHilo(true); }
@@ -253,6 +279,16 @@ function dmVolverALista() {
   document.getElementById('dm-ver-perfil').hidden = true;
   document.getElementById('dm-texto').disabled = true;
   document.getElementById('dm-enviar-boton').disabled = true;
+  document.getElementById('dm-enviar').classList.remove('d-none');
+  document.getElementById('dm-nombre').textContent = 'Selecciona una conversación';
+  document.getElementById('dm-perfil').removeAttribute('href');
+  document.getElementById('dm-avatar').replaceChildren();
+  document.getElementById('dm-mensajes').replaceChildren();
+  document.getElementById('dm-texto').value = '';
+  document.getElementById('dm-canal-oficial').hidden = true;
+  document.getElementById('dm-estado').textContent = '';
+  dmPintarAvales([]);
+  document.getElementById('dm-buscar').focus();
 }
 
 document.getElementById('dm-enviar').addEventListener('submit', dmEnviarMensaje);
