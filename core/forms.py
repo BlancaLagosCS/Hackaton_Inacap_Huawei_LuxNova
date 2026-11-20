@@ -8,6 +8,16 @@ from django.utils import timezone
 from .models import CARRERAS_CHOICES, Club, ComentarioForo, Evento, PublicacionForo, Sede, Usuario
 
 
+# Recibe una imagen validada por Pillow y un máximo en MB; devuelve la imagen o un error por tamaño/formato real no permitido.
+def validar_imagen_subida(imagen, max_mb):
+    if imagen and hasattr(imagen, 'content_type'):
+        if imagen.size > max_mb * 1024 * 1024:
+            raise forms.ValidationError(f'La imagen no debe superar {max_mb} MB.')
+        if getattr(getattr(imagen, 'image', None), 'format', None) not in ('PNG', 'JPEG', 'WEBP'):
+            raise forms.ValidationError('Solo se permiten imágenes PNG, JPG o WebP.')
+    return imagen
+
+
 # Recibe un RUT con formato libre; valida su dígito Módulo 11 y devuelve cuerpo-DV o un error de formulario.
 def validar_rut_chileno(rut_raw):
     limpio = re.sub(r'[.\s]', '', str(rut_raw)).upper()
@@ -99,8 +109,13 @@ class EditarPerfilForm(forms.ModelForm):
         model = Usuario
         fields = ('foto_usu', 'bio_usu')
         labels = {'foto_usu': 'Foto de perfil', 'bio_usu': 'Biografía'}
-        widgets = {'foto_usu': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/*'}),
+        help_texts = {'foto_usu': 'Tamaño recomendado: 400 × 400 px (formato cuadrado 1:1, JPG o PNG, máx. 2 MB). Se ajustará automáticamente en círculo.'}
+        widgets = {'foto_usu': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}),
                    'bio_usu': forms.Textarea(attrs={'class': 'form-control', 'rows': 3})}
+
+    # Recibe foto nueva, existente o marca de borrado; devuelve el valor validado con máximo de 2 MB para subidas nuevas.
+    def clean_foto_usu(self):
+        return validar_imagen_subida(self.cleaned_data.get('foto_usu'), 2)
 
 
 # Autentica por nombre o correo; recibe credenciales y devuelve un formulario con usuario autenticado.
@@ -131,12 +146,17 @@ class PublicacionForoForm(forms.ModelForm):
         model = PublicacionForo
         fields = ('etiq_publ', 'tit_publ', 'cont_publ', 'img_publ')
         labels = {'etiq_publ': 'Etiqueta', 'tit_publ': 'Título (opcional)', 'cont_publ': '¿Qué está pasando en tu sede?', 'img_publ': 'Foto (opcional)'}
+        help_texts = {'img_publ': 'Tamaño recomendado: 1080 × 720 px (horizontal o cuadrada, JPG o PNG, máx. 3 MB).'}
         widgets = {
             'etiq_publ': forms.Select(attrs={'class': 'form-select'}),
             'tit_publ': forms.TextInput(attrs={'class': 'form-control'}),
             'cont_publ': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
-            'img_publ': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/*', 'data-preview-input': 'vista-previa-foro'}),
+            'img_publ': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp', 'data-preview-input': 'vista-previa-foro'}),
         }
+
+    # Recibe imagen opcional del muro y devuelve el archivo validado con máximo de 3 MB.
+    def clean_img_publ(self):
+        return validar_imagen_subida(self.cleaned_data.get('img_publ'), 3)
 
 
 # Valida un comentario; recibe texto y devuelve contenido limpio sin permitir elegir autor ni publicación.
@@ -193,7 +213,12 @@ class SolicitarEventoForm(forms.ModelForm):
         model = Evento
         fields = ('tit_even', 'desc_even', 'ban_even', 'cat_even', 'alc_even', 'esp_even', 'fech_even')
         labels = {'tit_even': 'Título', 'desc_even': 'Descripción', 'ban_even': 'Banner (opcional)', 'cat_even': 'Categoría', 'alc_even': 'Alcance', 'fech_even': 'Fecha y hora (Chile)'}
-        widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/*'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
+        help_texts = {'ban_even': 'Tamaño recomendado: 1200 × 400 px (formato banner horizontal 3:1, JPG o PNG, máx. 3 MB).'}
+        widgets = {'tit_even': forms.TextInput(attrs={'class': 'form-control'}), 'desc_even': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}), 'ban_even': forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': 'image/png, image/jpeg, image/webp'}), 'cat_even': forms.Select(attrs={'class': 'form-select'}), 'alc_even': forms.Select(attrs={'class': 'form-select'}), 'fech_even': forms.DateTimeInput(format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local', 'class': 'form-control'})}
+
+    # Recibe banner opcional del evento y devuelve el archivo validado con máximo de 3 MB.
+    def clean_ban_even(self):
+        return validar_imagen_subida(self.cleaned_data.get('ban_even'), 3)
 
     # Recibe fecha interpretada en la zona local; devuelve una fecha futura o un error de formulario.
     def clean_fech_even(self):

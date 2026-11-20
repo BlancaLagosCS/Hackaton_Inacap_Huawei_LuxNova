@@ -46,10 +46,10 @@
 * **Python 3.12** (entorno virtual `venv/` en la raíz).
 * **Django 5.x** bajo patrón estricto **MVT** en una única aplicación central (`core/`).
 * **Base de Datos:** **PostgreSQL** local (`hackaton_luxnova` conectado en `config/settings.py` vía `psycopg2-binary`), preparado para migrar a **Huawei Cloud RDS for PostgreSQL**.
-* **Almacenamiento Multimedia:** `Pillow` + `ImageField` en `media/` local (nunca escribir rutas de archivos a mano para permitir migración directa a **Huawei OBS** con `django-storages`).
+* **Almacenamiento Multimedia (v7):** `Pillow` + `ImageField` con `MEDIA_ROOT = BASE_DIR / 'Galeria'`, `MEDIA_URL = '/media/'` y subcarpetas perfiles/, eventos/, foro/. Conservar `.url` de ImageField para permitir futura migración a Huawei OBS; nunca construir rutas manuales. El antiguo media/ queda como copia histórica, sin borrar archivos.
 * **Frontend:** HTML5 + **Bootstrap 5 (CDN)** + CSS3 (`static/css/estilos.css`) + **JavaScript Vanilla puro** (`static/js/animaciones.js`).
 * **Diseño oficial Blanca (vigente desde v5):** Fondo general `#9D1916` con texto `#FFFFFF`; botones/acento/bordes `#E61E28` con texto blanco; acento suave y buscador `#E9A0A2` con texto `#1A1A1A`. Tarjetas, formularios, modales y superficies de contenido blancos con texto negro. Roboto Regular 400 para texto, Light 300 para metadatos, Italic 400 para cursivas; títulos y destacados `'Myriad Pro', 'Roboto', sans-serif` en 700. Roboto se importa desde Google Fonts; Myriad Pro usa la instalación local si existe, sin distribuir fuentes licenciadas.
-* **Header y navegación v5:** Buscador funcional `?q=` en Home o Foro, avatar circular con exactamente “Mi cuenta”, “Mis publicaciones” y “Log Out” (POST), título de vista centrado y LogoInacap a la derecha con `width: 20%`. Conservar `<!-- ESPACIO LOGO INSTITUCIONAL AQUI (LogoInacap 20% width) -->` hasta recibir el logo. Navbar inferior con margen lateral 5% por lado y cuatro enlaces: Inicio (`/`), Foro (`/foro/`), Actividades (`/#actividades`) y Buzón de sugerencias (`/inbox/`, badge de no leídos).
+* **Header y navegación vigentes (v7):** Navbar blanco #FFFFFF en una sola fila de escritorio, texto #1A1A1A, borde inferior de 3px #E61E28 y sombra suave. Logo de Galeria/logo.png a la izquierda enlaza al Home; a la derecha Inicio, Foro, Actividades y Buzón de sugerencias (badge rojo/blanco), seguido por avatar circular con exactamente “Mi cuenta”, “Mis publicaciones” y “Log Out” (POST). Visitantes ven Iniciar sesión/Registrarse. Bootstrap navbar-toggler pliega el menú en pantallas menores a 1200px. Sin buscador en el header; el backend conserva `?q=` para enlaces existentes. El título de vista es blanco dentro de main, fuera del navbar. Las rutas conservan el namespace core.
 
 ### 4.2. Estructura del Repositorio
 ```text
@@ -59,7 +59,8 @@ Hackaton_Inacap_Huawei_LuxNova/
 │   └── management/commands/ # cargar_datos_demo.py (datos ficticios)
 ├── templates/               # base.html, home.html, login.html, registro.html, foro.html, perfil.html, inbox.html
 ├── static/                  # css/estilos.css, js/animaciones.js
-├── media/                   # Archivos subidos en local
+├── Galeria/                 # Logo e imágenes: perfiles/, eventos/, foro/ (MEDIA_ROOT)
+├── media/                   # Archivos históricos conservados como respaldo
 ├── CONTEXTO.md              # Este documento maestro
 ├── CONTEXTO_VERSIONES.md    # Bitácora acumulativa de versiones (v1 a v6)
 └── requirements.txt         # Dependencias instaladas
@@ -95,6 +96,8 @@ Regla para Agentes IA: Ejecutar estrictamente una versión a la vez siguiendo es
   - Alcance: Ruta /inbox/ con badge de no leídos, mensajes oficiales del Sistema con botones Aceptar / Rechazar Aval (al llegar a 4 avales aceptados, el Club escala automáticamente a PENDIENTE_DAE y notifica a la DAE) y pestaña Buzón de Iniciativas visible solo para Líderes y DAE.
 - v6 — Postulación a Club, Reserva de Espacios (Sin Solapamientos) y Panel/Auditoría DAE [COMPLETADA — VERSIÓN FINAL]:
   - Alcance: Formularios integrados en Mi Perfil según rol: (1) Postulación a Club seleccionando 4 compañeros de sede; (2) Solicitud de Reserva de Espacio/Evento; (3) Panel DAE/Admin para aprobar clubes (ascendiendo al creador a LIDER_ESTUDIANTIL + aviso Inbox), aprobar eventos validando no solapamiento de espacio/fecha/sede, editar roles de usuarios y visualizar la tabla de RegistroAuditoria.
+- v7 — Navbar y centralización de imágenes [COMPLETADA — PRIMERAS CORRECCIONES UI Y GALERÍA]:
+  - Alcance: Navbar blanco en una fila, menú móvil plegable, título en main, Galeria como MEDIA_ROOT y guías de dimensiones con validación de tamaño/formato de imágenes.
 
 ## 5. Registro y catálogo oficial de carreras (v4)
 
@@ -142,3 +145,13 @@ Logo oficial: `Galeria/logo.png`, disponible como `{% static 'logo.png' %}` porq
 Cuentas y guion de presentación: [CREDENCIALES.md](CREDENCIALES.md). cargar_datos_demo usa update_or_create para nueve cuentas de Rancagua, restablece sus roles y contraseñas según ese archivo, conserva relaciones y no reinicia decisiones de clubes/avales/eventos. Las antiguas contraseñas 1234 ya no aplican. Solo root_admin tiene flags Django is_staff/is_superuser. RUTs demo son identificadores sintéticos con DV válido, sin afirmar identidad de personas reales. Ejecutar la carga antes de la demostración; no entre el ascenso de est1 y la creación de su evento.
 
 Rutas finales: `/club/postular/`, `/evento/solicitar/`, `/panel/club/<id>/<aprobar|rechazar>/`, `/panel/evento/<id>/<aprobar|rechazar>/`, `/panel/usuario/<id>/rol/`. Formularios y panel se integran en `/perfil/`. Nube Huawei sigue como destino arquitectónico; esta instancia usa PostgreSQL y archivos locales. No se ha implementado verificación de asistencia presencial.
+
+## 8. Correcciones de interfaz y galería (v7 vigente)
+
+Galeria/ centraliza todas las imágenes, sin ignorarse en Git. STATICFILES_DIRS mantiene `[BASE_DIR / 'static', BASE_DIR / 'Galeria']`: logo.png se resuelve como estático, mientras las subidas conservan `/media/perfiles/...`, `/media/eventos/...` y `/media/foro/...`. Se prepararon las tres subcarpetas con .gitkeep. El directorio media/ anterior contenía solo .gitkeep; no había imágenes pendientes de copia ni se eliminó ningún archivo. Para futuras copias, conservar rutas relativas y no sobrescribir colisiones con contenido diferente.
+
+Guías visibles bajo cada campo (form-text text-muted): perfil 400 × 400 px, cuadrado 1:1 y máximo 2 MB; banner 1200 × 400 px, horizontal 3:1 y máximo 3 MB; foro 1080 × 720 px, horizontal o cuadrada y máximo 3 MB. Los selectores admiten PNG, JPEG y WebP; el servidor verifica el formato real después de Pillow y los límites en bytes (1 MB = 1024² bytes). Las dimensiones son recomendaciones, no requisitos de validación. No se redimensiona ni recorta el archivo: CSS realiza el encuadre visual.
+
+`.avatar-perfil`: 130 × 130 px, círculo, object-fit cover, borde rojo de 3px. `.banner-evento`: ancho completo, aspect-ratio 3/1, alto máximo 240px y object-fit cover. `.foto-foro`: conserva proporciones con object-fit contain y altura limitada. Se mantiene la vista previa Vanilla JS del foro. El fallback del logo es oscuro para conservar contraste sobre el nuevo navbar blanco.
+
+Estado de publicación: v6/v7 tienen commits locales. El push de v6 fue rechazado por la revisión automática por contraseñas en CREDENCIALES.md; el mismo contenido sigue en su historial. No reenviar esa publicación mediante una ruta alternativa. La v7 puede desarrollarse y probarse localmente; el push queda pendiente de una solución publicable sin credenciales.

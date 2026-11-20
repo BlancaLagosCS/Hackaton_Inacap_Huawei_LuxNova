@@ -14,20 +14,31 @@
 <body>
 <a class="visually-hidden-focusable" href="#contenido">Saltar al contenido</a>
 <header class="institutional-header">
-  <div class="header-superior">
-    <form class="header-search" method="get" action="{% if busqueda_en_foro %}{% url 'core:foro' %}{% else %}{% url 'core:home' %}{% endif %}" role="search"><label class="visually-hidden" for="busqueda-global">Buscar en {% if busqueda_en_foro %}Foro{% else %}Inicio{% endif %}</label><input id="busqueda-global" name="q" type="search" value="{{ busqueda_actual }}" placeholder="Buscar…" maxlength="200">{% if busqueda_en_foro and etiqueta %}<input type="hidden" name="etiqueta" value="{{ etiqueta }}">{% endif %}<button type="submit" aria-label="Buscar">Buscar</button></form>
-    {% if user.is_authenticated %}<div class="dropdown user-menu"><button class="avatar-button" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Abrir menú de usuario">{% if user.foto_usu %}<img src="{{ user.foto_usu.url }}" alt="">{% else %}<span aria-hidden="true">{{ user.nom_usu|default:user.username|first }}</span>{% endif %}</button><ul class="dropdown-menu"><li><a class="dropdown-item" href="{% url 'core:perfil' %}">Mi cuenta</a></li><li><a class="dropdown-item" href="{% url 'core:perfil' %}#publicaciones">Mis publicaciones</a></li><li><form method="post" action="{% url 'core:logout' %}">{% csrf_token %}<button class="dropdown-item" type="submit">Log Out</button></form></li></ul></div>{% endif %}
-    <div class="header-view-title">{% block titulo_vista %}{{ titulo_vista_default }}{% endblock %}</div>
-    <a class="institutional-logo" href="{% url 'core:home' %}" aria-label="INACAP Smart, inicio">
-      <!-- ESPACIO LOGO INSTITUCIONAL AQUI (LogoInacap 20% width) -->
-      <img src="{% static 'logo.png' %}" alt="Logo INACAP" class="img-fluid" style="max-height: 56px; object-fit: contain;" onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
-      <span hidden class="text-white fw-bold">INACAP</span>
-    </a>
-  </div>
-  <div class="header-session">{% if user.is_authenticated %}{{ user.sede_usu.nom_sede|default:'Sin sede asignada' }}{% else %}<a href="{% url 'core:login' %}">Iniciar sesión</a><span aria-hidden="true"> · </span><a href="{% url 'core:registro' %}">Registrarse</a>{% endif %}</div>
-  <nav class="navbar-inferior" aria-label="Navegación principal"><a href="{% url 'core:home' %}">Inicio</a><a href="{% url 'core:foro' %}">Foro</a><a href="{% url 'core:home' %}#actividades">Actividades</a><a href="{% url 'core:inbox' %}">Buzón de sugerencias <span class="badge rounded-pill inbox-badge" aria-label="{{ inbox_no_leidos }} mensajes no leídos">{{ inbox_no_leidos }}</span></a></nav>
+  <nav class="navbar navbar-expand-xl navbar-light" aria-label="Navegación principal">
+    <div class="container-fluid navbar-content">
+      <a class="navbar-brand" href="{% url 'core:home' %}" aria-label="INACAP Smart, inicio">
+        <!-- LOGO INSTITUCIONAL: Galeria/logo.png -->
+        <img src="{% static 'logo.png' %}" alt="Logo INACAP" class="img-fluid navbar-logo" onerror="this.hidden=true; this.nextElementSibling.hidden=false;">
+        <span hidden class="logo-fallback fw-bold">INACAP</span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navegacion" aria-controls="navegacion" aria-expanded="false" aria-label="Abrir navegación"><span class="navbar-toggler-icon"></span></button>
+      <div class="collapse navbar-collapse" id="navegacion">
+        <div class="ms-auto d-flex flex-column flex-xl-row align-items-xl-center gap-3 navbar-controls">
+          <ul class="navbar-nav align-items-xl-center gap-xl-3">
+            <li class="nav-item"><a class="nav-link" href="{% url 'core:home' %}">Inicio</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'core:foro' %}">Foro</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'core:home' %}#actividades">Actividades</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'core:inbox' %}">Buzón de sugerencias <span class="badge rounded-pill inbox-badge" aria-label="{{ inbox_no_leidos }} mensajes no leídos">{{ inbox_no_leidos }}</span></a></li>
+          </ul>
+          {% if user.is_authenticated %}<div class="dropdown user-menu"><button class="avatar-button" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Abrir menú de usuario">{% if user.foto_usu %}<img src="{{ user.foto_usu.url }}" alt="">{% else %}<span aria-hidden="true">{{ user.nom_usu|default:user.username|first }}</span>{% endif %}</button><ul class="dropdown-menu dropdown-menu-xl-end"><li><a class="dropdown-item" href="{% url 'core:perfil' %}">Mi cuenta</a></li><li><a class="dropdown-item" href="{% url 'core:perfil' %}#publicaciones">Mis publicaciones</a></li><li><form method="post" action="{% url 'core:logout' %}">{% csrf_token %}<button class="dropdown-item" type="submit">Log Out</button></form></li></ul></div>{% else %}<div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-dark btn-sm" href="{% url 'core:login' %}">Iniciar sesión</a><a class="btn btn-primary btn-sm" href="{% url 'core:registro' %}">Registrarse</a></div>{% endif %}
+        </div>
+      </div>
+    </div>
+  </nav>
 </header>
 <main id="contenido" class="container py-4 py-lg-5">
+  <h1 class="view-title mb-4">{% block titulo_vista %}{{ titulo_vista_default }}{% endblock %}</h1>
+  {% if user.is_authenticated %}<p class="small mb-4">{{ user.sede_usu.nom_sede|default:'Sin sede asignada' }}</p>{% endif %}
   {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}
   {% block content %}{% endblock %}
 </main>

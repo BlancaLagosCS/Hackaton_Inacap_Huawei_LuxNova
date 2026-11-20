@@ -1,6 +1,6 @@
 <div class="col-md-6 col-xl-4 event-reveal">
   <article class="card event-card h-100">
-    {% if evento.ban_even %}<img src="{{ evento.ban_even.url }}" class="card-img-top event-banner" alt="Banner de {{ evento.tit_even }}" loading="lazy">{% else %}<div class="event-banner banner-placeholder" role="img" aria-label="Evento de la comunidad INACAP"><span>ENCUÉNTRATE<br>CON TU COMUNIDAD.</span><small>LuxNova · INACAP</small></div>{% endif %}
+    {% if evento.ban_even %}<img src="{{ evento.ban_even.url }}" class="card-img-top banner-evento" alt="Banner de {{ evento.tit_even }}" loading="lazy">{% else %}<div class="banner-evento banner-placeholder" role="img" aria-label="Evento de la comunidad INACAP"><span>ENCUÉNTRATE<br>CON TU COMUNIDAD.</span><small>LuxNova · INACAP</small></div>{% endif %}
     <div class="card-body d-flex flex-column p-4"><span class="badge category-badge align-self-start mb-3">{{ evento.get_cat_even_display }}</span><h3 class="h4">{{ evento.tit_even }}</h3><p class="text-secondary">{{ evento.desc_even }}</p>
       <dl class="event-details"><dt>Fecha</dt><dd><time datetime="{{ evento.fech_even|date:'c' }}">{{ evento.fech_even|date:'d M Y · H:i' }}</time></dd><dt>Sede</dt><dd>{{ evento.sede_even.nom_sede }}</dd><dt>Espacio</dt><dd>{{ evento.esp_even }}</dd></dl>
       <p class="small">Organiza <a href="{% url 'core:ver_perfil' evento.crea_even_id %}">{{ evento.crea_even.nom_usu|default:evento.crea_even.username }}</a></p>

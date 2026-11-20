@@ -3,7 +3,7 @@
 {% block content %}
 <section class="card border-0 shadow-sm p-4 p-lg-5 mb-4">
 <div class="row g-4 align-items-center"><div class="col-md-3 text-center">
-{% if perfil_usuario.foto_usu %}<img class="profile-photo profile-photo-large" src="{{ perfil_usuario.foto_usu.url }}" alt="Foto de {{ perfil_usuario.nom_usu }}">{% else %}<div class="profile-photo profile-photo-large profile-placeholder mx-auto" aria-hidden="true">{{ perfil_usuario.nom_usu|default:perfil_usuario.username|first }}</div>{% endif %}
+{% if perfil_usuario.foto_usu %}<img class="avatar-perfil" src="{{ perfil_usuario.foto_usu.url }}" alt="Foto de {{ perfil_usuario.nom_usu }}">{% else %}<div class="avatar-perfil profile-placeholder mx-auto" aria-hidden="true">{{ perfil_usuario.nom_usu|default:perfil_usuario.username|first }}</div>{% endif %}
 </div><div class="col-md-9"><span class="eyebrow text-danger">COMUNIDAD INACAP</span><h1 class="mt-2">{{ perfil_usuario.nom_usu|default:perfil_usuario.username }}</h1><p>@{{ perfil_usuario.username }} <span class="badge text-bg-danger ms-2">{{ perfil_usuario.get_rol_usu_display }}</span></p>
 <p>{{ perfil_usuario.carr_usu }} · Ingreso {{ perfil_usuario.anio_usu|default:'Sin indicar' }}<br>{{ perfil_usuario.sede_usu.nom_sede|default:'Sin sede asignada' }}</p><p class="text-break">{{ perfil_usuario.bio_usu|default:'Tu comunidad comienza aquí.'|linebreaksbr }}</p>
 <p class="mb-1">Correo: {{ perfil_usuario.corr_usu }}</p>{% if puede_ver_telefono %}<p>Contacto visible por tu rol: {{ perfil_usuario.tel_usu }}</p>{% else %}<p class="text-secondary">Teléfono privado (solo Líderes y DAE)</p>{% endif %}
